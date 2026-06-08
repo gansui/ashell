@@ -2,6 +2,8 @@
 
 # ashell
 
+![Preview](preview.png)
+
 `ashell` 是一款现代化的、基于 GPUI Component 构建的 Rust 桌面终端客户端。
 
 该项目旨在通过结合本地和远程环境，并内置丰富的核心功能，提供一个高性能且美观的 Shell 工作区。

@@ -2,6 +2,8 @@
 
 # ashell
 
+![Preview](preview.png)
+
 `ashell` is a modern, GPUI Component-based desktop terminal client written in Rust.
 
 This project focuses on providing a high-performance and visually appealing shell workspace by combining local and remote environments with a rich set of built-in features. 
