@@ -1,43 +1,47 @@
-[English](README.md) | [中文](README.zh-CN.md)
+[中文](README.md) | [English](README.en.md)
 
 # ashell
 
 ![Preview](preview.png)
 
-`ashell` is a modern, GPUI Component-based desktop terminal client written in Rust.
+`ashell` 是一款现代化的、基于 GPUI Component 构建的 Rust 桌面终端客户端。
 
-This project focuses on providing a high-performance and visually appealing shell workspace by combining local and remote environments with a rich set of built-in features. 
+该项目旨在通过结合本地和远程环境，并内置丰富的核心功能，提供一个高性能且美观的 Shell 工作区。
 
-## Features
+## 下载
 
-The current version provides a fully-featured GPUI-native workspace:
+您可以从 [GitHub Releases 页面](https://github.com/rust-kotlin/ashell/releases/latest) 下载 macOS 版本的最新预编译程序。
 
-- **Local & Remote Sessions:** Open local terminal tabs or connect to remote servers via SSH.
-- **Advanced SSH Authentication:** Supports both password-based and key-based (file path or inline) SSH connections.
-- **Session Management:** Easily save, reopen, edit, and remove your SSH sessions.
-- **SFTP Integration:** Built-in SFTP file manager to browse, upload, download, and manage remote files.
-- **Robust Terminal Emulator:** Parses terminal output with `alacritty_terminal`, supporting rich ANSI color spans, fast rendering, and complete keyboard input forwarding.
-- **System Telemetry:** Real-time visualization of CPU, memory, swap, network, and disk metrics in the left cockpit sidebar.
-- **Theming System:** Switch between multiple GPUI Component themes directly from the top toolbar.
-- **Embedded Fonts:** Uses embedded Maple Mono NF CN fonts out-of-the-box for excellent CJK character and Nerd Font icon support.
+## 功能特性
 
-## Run
+当前版本提供了一个功能完备的 GPUI 原生工作区：
 
-To run the application locally:
+- **本地与远程会话**：支持打开本地终端标签页或通过 SSH 连接到远程服务器。
+- **高级 SSH 认证**：支持基于密码和基于密钥（文件路径或内联内容）的 SSH 连接方式。
+- **会话管理**：可以轻松地保存、重新打开、编辑和删除您的 SSH 会话。
+- **SFTP 集成**：内置 SFTP 文件管理器，可以浏览、上传、下载以及管理远程文件。
+- **强大的终端模拟器**：使用 `alacritty_terminal` 解析终端输出，支持丰富的 ANSI 颜色代码、极速渲染和完整的键盘输入转发。
+- **系统遥测**：在左侧边栏实时可视化显示 CPU、内存、Swap、网络和磁盘的使用指标。
+- **主题系统**：支持直接从顶部工具栏切换多种 GPUI Component 颜色主题。
+- **内置字体**：开箱即用，内置 Maple Mono NF CN 字体，提供卓越的中日韩（CJK）字符与 Nerd Font 图标支持。
+
+## 运行
+
+在本地运行该应用：
 
 ```bash
 cargo run --release
 ```
 
-## Package macOS App
+## 打包 macOS 应用
 
 ```bash
 ./scripts/package-macos-app.sh
 open target/release/ashell.app
 ```
 
-The packaging script creates a standard `.app` bundle. It does not attach an entitlements file, and after signing, it verifies that `com.apple.security.app-sandbox` is not present (meaning it runs non-sandboxed).
+该打包脚本会创建一个标准的 `.app` 应用程序包。它没有附加 entitlements 文件，并且在签名后会验证是否不存在 `com.apple.security.app-sandbox`（这意味着它在非沙盒模式下运行）。
 
-## License
+## 协议
 
-This project is licensed under the [GPL-3.0-or-later License](LICENSE).
+本项目采用 [GPL-3.0-or-later 协议](LICENSE) 开源。
