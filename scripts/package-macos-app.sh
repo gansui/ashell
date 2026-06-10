@@ -17,6 +17,8 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$ROOT_DIR/target/release/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 
+cp "$ROOT_DIR/assets/icons/ashell.icns" "$RESOURCES_DIR/ashell.icns"
+
 cat > "$CONTENTS_DIR/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -27,6 +29,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<EOF
   <string>en</string>
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
+  <key>CFBundleIconFile</key>
+  <string>ashell.icns</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleInfoDictionaryVersion</key>

@@ -3539,6 +3539,11 @@ fn sync_macos_launch_environment() {}
 fn open_main_window(cx: &mut App) {
     let mut window_options = WindowOptions::default();
 
+    #[cfg(not(target_os = "macos"))]
+    if let Ok(img) = image::load_from_memory(include_bytes!("../assets/icons/ashell.png")) {
+        window_options.icon = Some(std::sync::Arc::new(img.into_rgba8()));
+    }
+
     if let Some(display) = cx.displays().first().cloned() {
         let display_bounds = display.bounds();
         let width = display_bounds.size.width * 0.8;

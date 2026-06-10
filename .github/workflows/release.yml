@@ -86,6 +86,7 @@ jobs:
             mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 
             cp "target/${{ matrix.target }}/release/ashell" "$CONTENTS/MacOS/"
+            cp "assets/icons/ashell.icns" "$CONTENTS/Resources/ashell.icns"
 
             VERSION_NUM="${VERSION#v}"
             cat > "$CONTENTS/Info.plist" <<EOF
@@ -98,6 +99,8 @@ jobs:
             <string>en</string>
             <key>CFBundleExecutable</key>
             <string>ashell</string>
+            <key>CFBundleIconFile</key>
+            <string>ashell.icns</string>
             <key>CFBundleIdentifier</key>
             <string>dev.ashell.app</string>
             <key>CFBundleInfoDictionaryVersion</key>
