@@ -12,6 +12,7 @@ use gpui_component::ActiveTheme as _;
 
 use crate::Ashell;
 use crate::terminal::{RenderSnapshot, ViewportSelection};
+use crate::terminal::custom_blocks::{paint_custom_block, is_custom_block_supported};
 
 #[derive(Clone, Copy)]
 struct TerminalMetrics {
@@ -138,7 +139,17 @@ pub struct PrepaintState {
     metrics: TerminalMetrics,
     rects: Vec<LayoutRect>,
     runs: Vec<BatchedTextRun>,
+    custom_blocks: Vec<LayoutCustomBlock>,
     cursor: Option<CursorLayout>,
+}
+
+#[derive(Clone)]
+struct LayoutCustomBlock {
+    c: char,
+    row: i32,
+    col: i32,
+    cells: usize,
+    color: Hsla,
 }
 
 struct TerminalInputHandler {
@@ -331,9 +342,10 @@ impl TerminalElement {
         }
     }
 
-    fn layout_grid(&self, cx: &App) -> (Vec<LayoutRect>, Vec<BatchedTextRun>) {
+    fn layout_grid(&self, cx: &App) -> (Vec<LayoutRect>, Vec<BatchedTextRun>, Vec<LayoutCustomBlock>) {
         let mut rects = Vec::new();
         let mut runs = Vec::new();
+        let mut custom_blocks = Vec::new();
         let mut current_run: Option<BatchedTextRun> = None;
 
         for render_cell in &self.snapshot.cells {
@@ -371,6 +383,24 @@ impl TerminalElement {
             }
 
             let style = self.cell_run_style(cell, cx);
+
+            // Box Drawing & Block Elements interception
+            let is_custom_block = is_custom_block_supported(cell.c);
+
+            if is_custom_block {
+                if let Some(run) = current_run.take() {
+                    runs.push(run);
+                }
+                custom_blocks.push(LayoutCustomBlock {
+                    c: cell.c,
+                    row: render_cell.row,
+                    col: render_cell.col,
+                    cells: if cell.flags.contains(Flags::WIDE_CHAR) { 2 } else { 1 },
+                    color: style.color,
+                });
+                continue;
+            }
+
             if let Some(run) = current_run.as_mut() {
                 if run.can_append(&style, render_cell.row, render_cell.col) {
                     run.append(cell.c, cell.zerowidth());
@@ -402,7 +432,7 @@ impl TerminalElement {
             runs.push(run);
         }
 
-        (merge_rects(rects), runs)
+        (merge_rects(rects), runs, custom_blocks)
     }
 
     fn cursor_layout(&self, cx: &App) -> Option<CursorLayout> {
@@ -458,7 +488,7 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let _ = self.base_text_style(cx);
-        let (rects, runs) = self.layout_grid(cx);
+        let (rects, runs, custom_blocks) = self.layout_grid(cx);
         PrepaintState {
             bounds,
             metrics: TerminalMetrics {
@@ -467,6 +497,7 @@ impl Element for TerminalElement {
             },
             rects,
             runs,
+            custom_blocks,
             cursor: self.cursor_layout(cx),
         }
     }
@@ -487,6 +518,20 @@ impl Element for TerminalElement {
 
         for run in &prepaint.runs {
             run.paint(prepaint.bounds.origin, prepaint.metrics, window, cx);
+        }
+
+        for block in &prepaint.custom_blocks {
+            let x = prepaint.bounds.origin.x.as_f32() + block.col as f32 * prepaint.metrics.cell_width.as_f32();
+            let y = prepaint.bounds.origin.y.as_f32() + block.row as f32 * prepaint.metrics.line_height.as_f32();
+            paint_custom_block(
+                window,
+                block.c,
+                x,
+                y,
+                prepaint.metrics.cell_width.as_f32() * block.cells as f32,
+                prepaint.metrics.line_height.as_f32(),
+                block.color,
+            );
         }
 
         window.handle_input(

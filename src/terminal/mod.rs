@@ -1,5 +1,6 @@
 pub mod element;
 pub mod input;
+pub mod custom_blocks;
 
 use std::sync::mpsc::Sender;
 
