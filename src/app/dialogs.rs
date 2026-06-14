@@ -398,11 +398,78 @@ impl Ashell {
         let view = cx.entity();
         window.open_dialog(cx, move |dialog: Dialog, _window, _| {
             dialog
-                .title(t!("transfers").to_string())
                 .w(px(600.))
+                .close_button(false)
                 .content({
                     let view = view.clone();
                     move |content, window, cx| {
+                        let can_clear = view.read(cx).transfers.iter().any(|t| {
+                            !matches!(
+                                t.state,
+                                crate::terminal::TransferState::Running
+                                    | crate::terminal::TransferState::Paused
+                            )
+                        });
+
+                        let clear_btn = if can_clear {
+                            Some(
+                                Button::new("clear_transfers_btn")
+                                    .small()
+                                    .ghost()
+                                    .icon(IconName::Delete)
+                                    .label(t!("clear_transfers").to_string())
+                                    .on_click(window.listener_for(&view, |this, _, _, cx| {
+                                        this.transfers.retain(|t| {
+                                            matches!(
+                                                t.state,
+                                                crate::terminal::TransferState::Running
+                                                    | crate::terminal::TransferState::Paused
+                                            )
+                                        });
+                                        this.config.set_transfers(this.transfers.clone());
+                                        cx.notify();
+                                    })),
+                            )
+                        } else {
+                            None
+                        };
+
+                        let header = h_flex()
+                            .w_full()
+                            .justify_between()
+                            .items_center()
+                            .child(
+                                h_flex()
+                                    .items_baseline()
+                                    .child(
+                                        div()
+                                            .text_lg()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child(t!("transfers").to_string()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .ml_2()
+                                            .child(t!("transfers_limit").to_string()),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .children(clear_btn)
+                                    .child(
+                                        Button::new("close_dialog")
+                                            .small()
+                                            .ghost()
+                                            .icon(IconName::Close)
+                                            .on_click(|_, window, cx| {
+                                                window.close_dialog(cx);
+                                            }),
+                                    ),
+                            );
+
                         let mut transfers = view.read(cx).transfers.clone();
                         transfers.sort_by_key(|t| match t.state {
                             crate::terminal::TransferState::Running
@@ -412,14 +479,15 @@ impl Ashell {
 
                         if transfers.is_empty() {
                             return content.child(
-                                div()
-                                    .p_4()
-                                    .text_center()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(t!("no_transfers_yet").to_string()),
+                                v_flex().gap_2().child(header).child(
+                                    div()
+                                        .p_4()
+                                        .text_center()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(t!("no_transfers_yet").to_string()),
+                                ),
                             );
                         }
-
                         let list = v_flex().gap_2().children(transfers.into_iter().map(|t| {
                             let (icon, _color) = match t.info.kind {
                                 crate::terminal::TransferType::Upload => {
@@ -629,6 +697,7 @@ impl Ashell {
                                 )
                         }));
 
+
                         let scroll_handle = window
                             .use_keyed_state("transfers-scroll", cx, |_, _| {
                                 gpui::ScrollHandle::default()
@@ -637,31 +706,34 @@ impl Ashell {
                             .clone();
 
                         content.child(
-                            div()
-                                .w_full()
-                                .relative()
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .max_h(px(400.))
-                                        .flex_col()
-                                        .id("transfers-scroll-view")
-                                        .track_scroll(&scroll_handle)
-                                        .overflow_y_scroll()
-                                        .child(list),
-                                )
-                                .child(
-                                    div()
-                                        .absolute()
-                                        .top_0()
-                                        .right_0()
-                                        .bottom_0()
-                                        .w(px(16.))
-                                        .child(
-                                            Scrollbar::vertical(&scroll_handle)
-                                                .scrollbar_show(ScrollbarShow::Always),
-                                        ),
-                                ),
+                            v_flex().gap_2().child(header).child(
+                                div()
+                                    .w_full()
+                                    .relative()
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .max_h(px(400.))
+                                            .flex_col()
+                                            .id("transfers-scroll-view")
+                                            .track_scroll(&scroll_handle)
+                                            .overflow_y_scroll()
+                                            .pr(px(14.))
+                                            .child(list),
+                                    )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .right_0()
+                                            .bottom_0()
+                                            .w(px(16.))
+                                            .child(
+                                                Scrollbar::vertical(&scroll_handle)
+                                                    .scrollbar_show(ScrollbarShow::Always),
+                                            ),
+                                    ),
+                            )
                         )
                     }
                 })

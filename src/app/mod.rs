@@ -718,6 +718,9 @@ impl Ashell {
                             state: crate::terminal::TransferState::Running,
                         },
                     );
+                    if self.transfers.len() > 100 {
+                        self.transfers.truncate(100);
+                    }
                     transfers_changed = true;
                 }
                 BackendEvent::SftpHome { tab_id, home } => {
