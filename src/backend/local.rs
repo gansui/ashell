@@ -94,28 +94,40 @@ pub fn spawn_local_terminal(
     let write_tab = tab_id.clone();
     let write_events = events.clone();
     thread::spawn(move || {
-        while let Ok(command) = cmd_rx.recv() {
-            match command {
-                BackendCommand::Input(bytes) => {
-                    if let Err(err) = writer.write_all(&bytes) {
-                        let _ = write_events.send(BackendEvent::Closed {
-                            tab_id: write_tab.clone(),
-                            reason: format!("local write error: {err}"),
-                        });
-                        break;
+        loop {
+            match cmd_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(command) => match command {
+                    BackendCommand::Input(bytes) => {
+                        if let Err(err) = writer.write_all(&bytes) {
+                            let _ = write_events.send(BackendEvent::Closed {
+                                tab_id: write_tab.clone(),
+                                reason: format!("local write error: {err}"),
+                            });
+                            break;
+                        }
+                        let _ = writer.flush();
                     }
-                    let _ = writer.flush();
+                    BackendCommand::Resize { cols, rows } => {
+                        let _ = master.resize(PtySize {
+                            rows,
+                            cols,
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        });
+                    }
+                    BackendCommand::Close => break,
+                    BackendCommand::SampleMetrics => {}
+                },
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Ok(Some(status)) = child.try_wait() {
+                        let _ = write_events.send(BackendEvent::Closed {
+                            tab_id: write_tab,
+                            reason: format!("local shell exited: {status}"),
+                        });
+                        return;
+                    }
                 }
-                BackendCommand::Resize { cols, rows } => {
-                    let _ = master.resize(PtySize {
-                        rows,
-                        cols,
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    });
-                }
-                BackendCommand::Close => break,
-                BackendCommand::SampleMetrics => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
         let _ = child.kill();
