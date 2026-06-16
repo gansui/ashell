@@ -5,7 +5,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, rems, uniform_list,
 };
 use gpui_component::{
-    ActiveTheme, Disableable as _, ElementExt, IconName, Root, Sizable as _,
+    ActiveTheme, Disableable as _, ElementExt, Icon, IconName, Root, Size, Sizable as _,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -118,9 +118,65 @@ impl Ashell {
     ) -> impl IntoElement {
         let active_sftp = self.active_sftp();
 
+        // Compute active download progress for status bar and minimized header
+        let build_summary = |kind: crate::terminal::TransferType| -> Option<(String, String, f32)> {
+            let active: Vec<&crate::terminal::Transfer> = self
+                .transfers
+                .iter()
+                .filter(|t| {
+                    matches!(
+                        t.state,
+                        crate::terminal::TransferState::Running
+                            | crate::terminal::TransferState::Paused
+                    ) && t.info.kind == kind
+                })
+                .collect();
+            if active.is_empty() {
+                return None;
+            }
+            Some(if active.len() == 1 {
+                let t = &active[0];
+                let pct = t.total.and_then(|total| {
+                    if total > 0 {
+                        Some((t.transferred as f64 / total as f64 * 100.0) as f32)
+                    } else {
+                        None
+                    }
+                });
+                match pct {
+                    Some(pct) => (t.info.name.clone(), format!("{:.0}%", pct), pct),
+                    None => (t.info.name.clone(), "-".to_string(), 0.0),
+                }
+            } else {
+                let total_transferred: u64 = active.iter().map(|t| t.transferred).sum();
+                let total_total: u64 = active.iter().filter_map(|t| t.total).sum();
+                let pct = if total_total > 0 {
+                    Some((total_transferred as f64 / total_total as f64 * 100.0) as f32)
+                } else {
+                    None
+                };
+                let label = match kind {
+                    crate::terminal::TransferType::Download => {
+                        format!("{} files downloading", active.len())
+                    }
+                    crate::terminal::TransferType::Upload => {
+                        format!("{} files uploading", active.len())
+                    }
+                };
+                match pct {
+                    Some(pct) => (label, format!("{:.0}%", pct), pct),
+                    None => (label, "-".to_string(), 0.0),
+                }
+            })
+        };
+        let dl_summary = build_summary(crate::terminal::TransferType::Download);
+        let ul_summary = build_summary(crate::terminal::TransferType::Upload);
+        let has_transfers = dl_summary.is_some() || ul_summary.is_some();
+
         let header = h_flex()
             .flex_none()
             .h(px(34.))
+            .px_2()
             .items_center()
             .gap_2()
             .border_b_1()
@@ -226,61 +282,123 @@ impl Ashell {
                             cx.notify();
                         })),
                 )
-            })
-            .child(
-                Button::new("open-transfers")
-                    .ghost()
-                    .small()
-                    .icon(IconName::ArrowDown)
-                    .label(t!("transfers").to_string())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.show_transfers_dialog(window, cx);
-                    })),
-            )
-            .child(
-                Button::new("sftp-minimize-toggle")
-                    .ghost()
-                    .small()
-                    .icon(if self.sftp_panel_minimized {
-                        IconName::ChevronUp
-                    } else {
-                        IconName::ChevronDown
-                    })
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_sftp_minimized(window, cx);
-                    })),
-            );
+            });
 
         let Some(sftp) = active_sftp else {
-            let mut panel = v_flex()
+            let mut outer = v_flex()
                 .gap_0()
                 .border_color(cx.theme().border)
-                .bg(cx.theme().background);
-
-            if !self.sftp_panel_minimized {
-                panel = panel.size_full();
-            } else {
-                panel = panel.flex_none();
-            }
-
-            panel = panel.child(header);
-
-            if !self.sftp_panel_minimized {
-                panel = panel.child(
+                .bg(cx.theme().background)
+                .flex_1()
+                .child(
                     v_flex()
                         .flex_1()
-                        .items_center()
-                        .justify_center()
-                        .p_3()
+                        .min_h(px(0.))
+                        .when(self.sftp_panel_minimized, |this| this.hidden())
+                        .child(header)
                         .child(
-                            div()
-                                .text_size(rems(1.0))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(t!("open_ssh_tab_sftp")),
+                            v_flex()
+                                .flex_1()
+                                .items_center()
+                                .justify_center()
+                                .p_3()
+                                .child(
+                                    div()
+                                        .text_size(rems(1.0))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(t!("open_ssh_tab_sftp")),
+                                ),
                         ),
                 );
-            }
-            return panel.into_any_element();
+            outer = outer.child(
+                h_flex()
+                    .flex_none()
+                    .h(px(24.))
+                    .px_3()
+                    .items_center()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().tab_bar)
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("open-transfers")
+                            .ghost()
+                            .small()
+                            .when(has_transfers, |this| {
+                                let mut content = h_flex().items_center().gap_2();
+                                if let Some((ref label, ref pct_display, pct)) = dl_summary {
+                                    content = content.child(
+                                        h_flex().items_center().gap_1()
+                                            .child(Icon::new(IconName::ArrowDown)
+                                                .with_size(Size::Small)
+                                                .text_color(cx.theme().primary))
+                                            .child(div()
+                                                .text_size(rems(0.833))
+                                                .text_color(cx.theme().primary)
+                                                .italic()
+                                                .child(label.clone()))
+                                            .child(Progress::new("sftp-status-dl")
+                                                .with_size(px(4.))
+                                                .value(pct)
+                                                .color(cx.theme().primary)
+                                                .w(px(50.0)))
+                                            .child(div()
+                                                .text_size(rems(0.833))
+                                                .text_color(cx.theme().primary)
+                                                .italic()
+                                                .child(pct_display.clone())),
+                                    );
+                                }
+                                if let Some((ref label, ref pct_display, pct)) = ul_summary {
+                                    if dl_summary.is_some() {
+                                        content = content.child(div().w(px(6.)));
+                                    }
+                                    content = content.child(
+                                        h_flex().items_center().gap_1()
+                                            .child(Icon::new(IconName::ArrowUp)
+                                                .with_size(Size::Small)
+                                                .text_color(cx.theme().primary))
+                                            .child(div()
+                                                .text_size(rems(0.833))
+                                                .text_color(cx.theme().primary)
+                                                .italic()
+                                                .child(label.clone()))
+                                            .child(Progress::new("sftp-status-ul")
+                                                .with_size(px(4.))
+                                                .value(pct)
+                                                .color(cx.theme().primary)
+                                                .w(px(50.0)))
+                                            .child(div()
+                                                .text_size(rems(0.833))
+                                                .text_color(cx.theme().primary)
+                                                .italic()
+                                                .child(pct_display.clone())),
+                                    );
+                                }
+                                this.child(content)
+                            })
+                            .when(!has_transfers, |this| {
+                                this.icon(IconName::ArrowDown)
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.show_transfers_dialog(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("sftp-minimize-toggle")
+                            .ghost()
+                            .small()
+                            .icon(if self.sftp_panel_minimized {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronDown
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_sftp_minimized(window, cx);
+                            })),
+                    ),
+            );
+            return outer.into_any_element();
         };
 
         let selected_path = sftp.selected_path.clone();
@@ -302,18 +420,11 @@ impl Ashell {
         let size_col_width = px(96.);
         let modified_col_width = px(152.);
 
-        let mut panel = v_flex()
+        let mut outer = v_flex()
             .gap_0()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background);
-
-        if !self.sftp_panel_minimized {
-            panel = panel.size_full();
-        } else {
-            panel = panel.flex_none();
-        }
-
-        panel = panel
+            .bg(cx.theme().background)
+            .flex_1()
             .on_drop(
                 cx.listener(|this, paths: &gpui::ExternalPaths, _window, cx| {
                     let paths_to_upload: Vec<String> = paths
@@ -323,11 +434,14 @@ impl Ashell {
                         .collect();
                     this.upload_sftp_files_batch(paths_to_upload, cx);
                 }),
-            )
-            .child(header);
+            );
 
-        if !self.sftp_panel_minimized {
-            panel = panel
+        outer = outer.child(
+            v_flex()
+                .flex_1()
+                .min_h(px(0.))
+                .when(self.sftp_panel_minimized, |this| this.hidden())
+                .child(header)
                 .child(
                     h_flex()
                         .h(px(36.))
@@ -592,27 +706,106 @@ impl Ashell {
                                 ),
                         ),
                 )
-                .child(
-                    h_flex()
-                        .flex_none()
-                        .h(px(24.))
-                        .px_3()
-                        .items_center()
-                        .border_t_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().tab_bar)
-                        .child(
-                            div()
-                                .min_w(px(0.))
-                                .overflow_hidden()
-                                .text_size(rems(0.917))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(status),
-                        ),
                 );
-        }
+        outer = outer.child(
+            h_flex()
+                .flex_none()
+                .h(px(24.))
+                .px_3()
+                .items_center()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().tab_bar)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .overflow_hidden()
+                        .text_size(rems(0.833))
+                        .text_color(cx.theme().primary)
+                        .italic()
+                        .child(status),
+                )
+                .child(
+                    Button::new("open-transfers")
+                        .ghost()
+                        .small()
+                        .when(has_transfers, |this| {
+                            let mut content = h_flex().items_center().gap_2();
+                            if let Some((ref label, ref pct_display, pct)) = dl_summary {
+                                content = content.child(
+                                    h_flex().items_center().gap_1()
+                                        .child(Icon::new(IconName::ArrowDown)
+                                            .with_size(Size::Small)
+                                            .text_color(cx.theme().primary))
+                                        .child(div()
+                                            .text_size(rems(0.833))
+                                            .text_color(cx.theme().primary)
+                                            .italic()
+                                            .child(label.clone()))
+                                        .child(Progress::new("sftp-status-dl")
+                                            .with_size(px(4.))
+                                            .value(pct)
+                                            .color(cx.theme().primary)
+                                            .w(px(50.0)))
+                                        .child(div()
+                                            .text_size(rems(0.833))
+                                            .text_color(cx.theme().primary)
+                                            .italic()
+                                            .child(pct_display.clone())),
+                                );
+                            }
+                            if let Some((ref label, ref pct_display, pct)) = ul_summary {
+                                if dl_summary.is_some() {
+                                    content = content.child(div().w(px(6.)));
+                                }
+                                content = content.child(
+                                    h_flex().items_center().gap_1()
+                                        .child(Icon::new(IconName::ArrowUp)
+                                            .with_size(Size::Small)
+                                            .text_color(cx.theme().primary))
+                                        .child(div()
+                                            .text_size(rems(0.833))
+                                            .text_color(cx.theme().primary)
+                                            .italic()
+                                            .child(label.clone()))
+                                        .child(Progress::new("sftp-status-ul")
+                                            .with_size(px(4.))
+                                            .value(pct)
+                                            .color(cx.theme().primary)
+                                            .w(px(50.0)))
+                                        .child(div()
+                                            .text_size(rems(0.833))
+                                            .text_color(cx.theme().primary)
+                                            .italic()
+                                            .child(pct_display.clone())),
+                                );
+                            }
+                            this.child(content)
+                        })
+                        .when(!has_transfers, |this| {
+                            this.icon(IconName::ArrowDown)
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.show_transfers_dialog(window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("sftp-minimize-toggle")
+                        .ghost()
+                        .small()
+                        .icon(if self.sftp_panel_minimized {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.toggle_sftp_minimized(window, cx);
+                        })),
+                ),
+        );
 
-        panel.into_any_element()
+        outer.into_any_element()
     }
 
     fn render_monitoring_panel(
@@ -2012,46 +2205,36 @@ impl Render for Ashell {
             .child(self.render_sftp_panel(window, cx));
 
         let is_monitor_bottom = self.config.monitoring_position() == "Bottom";
-        let minimized_height = if is_monitor_bottom { 114. } else { 34. };
+        let minimized_height = if is_monitor_bottom { 104. } else { 24. };
         let min_panel_height = if is_monitor_bottom { 260. } else { 180. };
         let default_panel_height = if is_monitor_bottom { 328. } else { 248. };
 
-        let body_panel = if self.sftp_panel_minimized {
-            v_flex()
-                .size_full()
-                .child(
-                    div().flex_1().min_h(px(0.)).child(
-                        v_resizable("ashell-body")
-                            .with_state(&self.body_panels)
-                            .child(resizable_panel().child(self.render_terminal_panel(cx))),
-                    ),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .h(px(minimized_height))
-                        .w_full()
-                        .border_t_1()
-                        .border_color(cx.theme().border)
-                        .child(monitoring_contents),
-                )
-                .into_any_element()
+        let sftp_size = if self.sftp_panel_minimized {
+            px(minimized_height)
         } else {
-            v_resizable("ashell-body")
-                .with_state(&self.body_panels)
-                .child(resizable_panel().child(self.render_terminal_panel(cx)))
-                .child(
-                    resizable_panel()
-                        .size(px(self
-                            .config
-                            .body_panels()
-                            .and_then(|s| s.get(1).copied())
-                            .unwrap_or(default_panel_height)))
-                        .size_range(px(min_panel_height)..px(1200.))
-                        .child(monitoring_contents),
-                )
-                .into_any_element()
+            px(self
+                .config
+                .body_panels()
+                .and_then(|s| s.get(1).copied())
+                .unwrap_or(default_panel_height))
         };
+
+        let body_panel = v_resizable("ashell-body")
+            .with_state(&self.body_panels)
+            .child(resizable_panel().child(self.render_terminal_panel(cx)))
+            .child(
+                resizable_panel()
+                    .size(sftp_size)
+                    .size_range(
+                        if self.sftp_panel_minimized {
+                            px(minimized_height)..px(minimized_height)
+                        } else {
+                            px(min_panel_height)..px(1200.)
+                        },
+                    )
+                    .child(monitoring_contents),
+            )
+            .into_any_element();
 
         let main_area = resizable_panel().child(
             v_flex()
