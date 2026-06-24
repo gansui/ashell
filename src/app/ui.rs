@@ -2943,5 +2943,30 @@ impl Render for Ashell {
                         ),
                 )
             })
+            .on_prepaint({
+                let view = cx.entity().clone();
+                move |_, window, cx| {
+                    view.update(cx, |this, cx| {
+                        let current_win_size = window.viewport_size();
+                        let size_changed = this.last_window_size.map_or(true, |prev| prev != current_win_size);
+                        this.last_window_size = Some(current_win_size);
+
+                        let current_sizes = this.workspace_panels.read(cx).sizes().clone();
+                        if let Some(current_first_size) = current_sizes.first().copied() {
+                            if size_changed {
+                                if let Some(target_width) = this.last_sidebar_width {
+                                    if current_first_size != target_width {
+                                        this.workspace_panels.update(cx, |state, cx| {
+                                            state.resize_panel(0, target_width, window, cx);
+                                        });
+                                    }
+                                }
+                            } else {
+                                this.last_sidebar_width = Some(current_first_size);
+                            }
+                        }
+                    });
+                }
+            })
     }
 }

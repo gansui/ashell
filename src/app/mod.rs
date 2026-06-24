@@ -304,6 +304,8 @@ pub(crate) struct Ashell {
     pub(crate) runtime: Runtime,
     pub(crate) events_rx: mpsc::Receiver<BackendEvent>,
     pub(crate) events_tx: mpsc::Sender<BackendEvent>,
+    pub(crate) last_window_size: Option<gpui::Size<Pixels>>,
+    pub(crate) last_sidebar_width: Option<Pixels>,
     pub(crate) _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -506,6 +508,10 @@ impl Ashell {
         gpui_component::set_locale(&active_locale);
         let ui_font_family: SharedString = config.ui_font_family().into();
         let terminal_font_family: SharedString = config.terminal_font_family().into();
+        let last_sidebar_width = Some(px(config
+            .workspace_panels()
+            .and_then(|s| s.first().copied())
+            .unwrap_or(constants::SIDEBAR_WIDTH)));
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             selector_focus_handle: cx.focus_handle(),
@@ -621,6 +627,8 @@ impl Ashell {
             runtime: Runtime::new().expect("create tokio runtime"),
             events_rx,
             events_tx,
+            last_window_size: None,
+            last_sidebar_width,
             _subscriptions,
         };
 
