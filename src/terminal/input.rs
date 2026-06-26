@@ -225,7 +225,7 @@ impl Ashell {
             tab.scroll_to_bottom();
         }
         tab.clear_selection();
-        tab.paste_text(text);
+        tab.paste_text(text, self.config.bracketed_paste());
         window.prevent_default();
         cx.stop_propagation();
         cx.notify();

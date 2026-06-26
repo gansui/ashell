@@ -124,6 +124,8 @@ zombie_reason: "This transfer was interrupted because the application exited. Th
 software_builtin: "Built-in"
 retry: "Retry"
 right_click_copy_paste: "Right-click Copy/Paste"
+bracketed_paste: "Bracketed Paste Mode"
+bracketed_paste_hint: "Wraps pasted text with escape sequences to prevent TUI programs from executing each line."
 keyword_highlight: "Terminal Keyword Highlighting"
 copy_paste_hint: "Selected text can also be copied by left-clicking."
 settings_copy: "Copy Selection"

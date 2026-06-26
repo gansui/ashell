@@ -489,11 +489,17 @@ impl TerminalTab {
         }
     }
 
-    pub fn paste_text(&mut self, text: &str) {
-        let paste_text = text
+    pub fn paste_text(&mut self, text: &str, bracketed: bool) {
+        let cleaned = text
             .replace('\x1b', "")
             .replace("\r\n", "\r")
             .replace('\n', "\r");
+
+        let paste_text = if bracketed {
+            format!("\x1b[200~{}\x1b[201~", cleaned)
+        } else {
+            cleaned
+        };
 
         self.send_backend(BackendCommand::Input(paste_text.into_bytes()));
     }

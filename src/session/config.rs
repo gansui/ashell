@@ -181,6 +181,8 @@ pub struct ConfigFile {
     pub ui_font_size: f32,
     #[serde(default)]
     pub right_click_copy_paste: bool,
+    #[serde(default = "default_true")]
+    pub bracketed_paste: bool,
     #[serde(default)]
     pub keyword_highlight: bool,
     #[serde(default = "default_ui_font_family")]
@@ -247,6 +249,10 @@ pub struct ConfigFile {
     pub global_proxy_password: String,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_read_env_proxy() -> bool {
     true
 }
@@ -304,6 +310,7 @@ impl Default for ConfigFile {
             terminal_font_size: default_terminal_font_size(),
             ui_font_size: default_ui_font_size(),
             right_click_copy_paste: false,
+            bracketed_paste: true,
             keyword_highlight: false,
             ui_font_family: default_ui_font_family(),
             terminal_font_family: default_terminal_font_family(),
@@ -640,6 +647,14 @@ impl ConfigStore {
 
     pub fn set_right_click_copy_paste(&mut self, val: bool) {
         self.cache.right_click_copy_paste = val;
+    }
+
+    pub fn bracketed_paste(&self) -> bool {
+        self.cache.bracketed_paste
+    }
+
+    pub fn set_bracketed_paste(&mut self, val: bool) {
+        self.cache.bracketed_paste = val;
     }
 
     pub fn keyword_highlight(&self) -> bool {

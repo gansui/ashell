@@ -1662,6 +1662,25 @@ impl Ashell {
                                                 )
                                                 .item(
                                                     SettingItem::new(
+                                                        t!("bracketed_paste").to_string(),
+                                                        SettingField::render({
+                                                            let view = view_clone_for_general.clone();
+                                                            move |_, window, cx| {
+                                                                Switch::new("bracketed-paste")
+                                                                    .small()
+                                                                    .checked(view.read(cx).config.bracketed_paste())
+                                                                    .on_click(window.listener_for(&view, |this, checked, _, cx| {
+                                                                        this.config.set_bracketed_paste(*checked);
+                                                                        let _ = this.config.save();
+                                                                        cx.notify();
+                                                                    }))
+                                                                    .into_any_element()
+                                                            }
+                                                        })
+                                                    ).description(t!("bracketed_paste_hint").to_string())
+                                                )
+                                                .item(
+                                                    SettingItem::new(
                                                         t!("keyword_highlight").to_string(),
                                                         SettingField::render({
                                                             let view = view_clone_for_general.clone();
