@@ -315,10 +315,6 @@ pub(crate) struct Ashell {
     pub(crate) events_tx: mpsc::Sender<BackendEvent>,
     pub(crate) last_window_size: Option<gpui::Size<Pixels>>,
     pub(crate) last_sidebar_width: Option<Pixels>,
-    pub(crate) sidebar_hover_start: Option<std::time::Instant>,
-    pub(crate) sidebar_drag_ready: bool,
-    pub(crate) sidebar_dragging: bool,
-    pub(crate) sidebar_drag_origin: Option<gpui::Point<Pixels>>,
     pub(crate) _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -672,10 +668,6 @@ impl Ashell {
             events_tx,
             last_window_size: None,
             last_sidebar_width,
-            sidebar_hover_start: None,
-            sidebar_drag_ready: false,
-            sidebar_dragging: false,
-            sidebar_drag_origin: None,
             _subscriptions,
         };
 

@@ -13,7 +13,7 @@ use gpui_component::{
     input::Input,
     menu::{ContextMenuExt as _, PopupMenuItem},
     progress::Progress,
-    resizable::{resizable_panel, v_resizable},
+    resizable::{h_resizable, resizable_panel, v_resizable},
     scroll::{ScrollableElement as _, Scrollbar, ScrollbarShow},
     tab::{Tab, TabBar},
     v_flex,
@@ -2500,7 +2500,7 @@ impl Ashell {
                                     .hover(|s| s.bg(cx.theme().accent))
                                     .on_mouse_down(
                                         MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                        cx.listener(move |this, event, window, cx| {
                                             window.prevent_default();
                                             cx.stop_propagation();
                                             this.start_drag_split(
@@ -2699,120 +2699,44 @@ impl Render for Ashell {
                 )
                 .into_any_element()
         } else {
-            let sidebar_width = self
-                .workspace_panels
-                .read(cx)
-                .sizes()
-                .first()
-                .copied()
-                .unwrap_or(px(SIDEBAR_WIDTH));
+            let sidebar_area = resizable_panel()
+                .size(px(self
+                    .config
+                    .workspace_panels()
+                    .and_then(|s| s.first().copied())
+                    .unwrap_or(SIDEBAR_WIDTH)))
+                .size_range(px(240.)..px(520.))
+                .flex_none()
+                .child(self.sidebar(cx));
 
-            let drag_ready = self.sidebar_drag_ready;
-            let dragging = self.sidebar_dragging;
+            let main_area = resizable_panel().child(
+                v_flex()
+                    .size_full()
+                    .relative()
+                    .overflow_hidden()
+                    .when(
+                        self.active_title_bar_style
+                            == crate::session::config::TitleBarStyle::Native,
+                        |this| {
+                            this.child(
+                                div()
+                                    .flex_none()
+                                    .h(px(32.))
+                                    .w_full()
+                                    .bg(cx.theme().tab_bar)
+                                    .border_b_1()
+                                    .border_color(cx.theme().border)
+                                    .child(self.render_tab_bar(cx)),
+                            )
+                        },
+                    )
+                    .child(body_panel),
+            );
 
-            let main_content = v_flex()
-                .size_full()
-                .relative()
-                .overflow_hidden()
-                .when(
-                    self.active_title_bar_style
-                        == crate::session::config::TitleBarStyle::Native,
-                    |this| {
-                        this.child(
-                            div()
-                                .flex_none()
-                                .h(px(32.))
-                                .w_full()
-                                .bg(cx.theme().tab_bar)
-                                .border_b_1()
-                                .border_color(cx.theme().border)
-                                .child(self.render_tab_bar(cx)),
-                        )
-                    },
-                )
-                .child(body_panel);
-
-            h_flex()
-                .id("ashell-workspace-custom")
-                .size_full()
-                .child(
-                    div()
-                        .id("sidebar-panel")
-                        .flex_none()
-                        .h_full()
-                        .w(sidebar_width)
-                        .overflow_hidden()
-                        .child(self.sidebar(cx)),
-                )
-                .child(
-                    div()
-                        .id("sidebar-divider")
-                        .w(px(9.))
-                        .h_full()
-                        .flex_none()
-                        .relative()
-                        .on_hover({
-                            let view = cx.entity().clone();
-                            move |hovering, _, cx| {
-                                view.update(cx, |this, _| {
-                                    if *hovering {
-                                        if this.sidebar_hover_start.is_none() {
-                                            this.sidebar_hover_start =
-                                                Some(std::time::Instant::now());
-                                            this.sidebar_drag_ready = false;
-                                        }
-                                    } else {
-                                        if !this.sidebar_dragging {
-                                            this.sidebar_hover_start = None;
-                                            this.sidebar_drag_ready = false;
-                                        }
-                                    }
-                                });
-                            }
-                        })
-                        .child(
-                            div()
-                                .id("sidebar-divider-handle")
-                                .absolute()
-                                .top_0()
-                                .bottom_0()
-                                .left(px(4.))
-                                .w(px(1.))
-                                .bg(cx.theme().border)
-                                .group_hover("sidebar-divider", |this| {
-                                    this.bg(cx.theme().accent)
-                                }),
-                        )
-                        .map(|this| {
-                            if drag_ready || dragging {
-                                this.cursor_col_resize()
-                            } else {
-                                this.cursor(gpui::CursorStyle::Arrow)
-                            }
-                        })
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                if !this.sidebar_drag_ready && !this.sidebar_dragging {
-                                    return;
-                                }
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.sidebar_dragging = true;
-                                this.sidebar_drag_origin = Some(event.position);
-                                cx.notify();
-                            }),
-                        ),
-                )
-                .child(
-                    div()
-                        .id("main-panel")
-                        .flex_1()
-                        .h_full()
-                        .min_w(px(0.))
-                        .overflow_hidden()
-                        .child(main_content),
-                )
+            h_resizable("ashell-workspace")
+                .with_state(&self.workspace_panels)
+                .child(sidebar_area)
+                .child(main_area)
                 .into_any_element()
         };
 
@@ -2999,17 +2923,6 @@ impl Render for Ashell {
                                 }
                             } else {
                                 this.last_sidebar_width = Some(current_first_size);
-                            }
-                        }
-
-                        if !this.sidebar_dragging {
-                            if let Some(start) = this.sidebar_hover_start {
-                                if !this.sidebar_drag_ready
-                                    && start.elapsed() >= std::time::Duration::from_secs(2)
-                                {
-                                    this.sidebar_drag_ready = true;
-                                    cx.notify();
-                                }
                             }
                         }
                     });
