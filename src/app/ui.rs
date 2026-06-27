@@ -1,7 +1,8 @@
 use gpui::{
-    Context, ElementId, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement as _, PathBuilder, Pixels, Render,
-    StatefulInteractiveElement as _, Styled as _, Window, canvas, div, hsla, point,
+    Context, ElementId, Focusable as _, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
+    PathBuilder, Pixels, Render, StatefulInteractiveElement as _, Styled as _, Window, canvas, div,
+    hsla, point,
     prelude::FluentBuilder as _, px, relative, rems, uniform_list,
 };
 use gpui_component::{
@@ -13,7 +14,7 @@ use gpui_component::{
     input::Input,
     menu::{ContextMenuExt as _, PopupMenuItem},
     progress::Progress,
-    resizable::{h_resizable, resizable_panel, v_resizable},
+    resizable::{resizable_panel, v_resizable},
     scroll::{ScrollableElement as _, Scrollbar, ScrollbarShow},
     tab::{Tab, TabBar},
     v_flex,
@@ -1315,6 +1316,25 @@ impl Ashell {
             .gap_4()
             .w_full()
             .p_2()
+            .relative()
+            .child(
+                div()
+                    .id("sidebar-drag-handle")
+                    .absolute()
+                    .top(px(0.0))
+                    .right(px(0.0))
+                    .h(px(20.0))
+                    .w(px(8.0))
+                    .cursor_col_resize()
+                    .rounded(px(2.0))
+                    .bg(cx.theme().border)
+                    .hover(|s| s.bg(cx.theme().accent))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, event, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.start_sidebar_drag(event, cx);
+                    })),
+            )
             .child(
                 v_flex()
                     .gap_1()
@@ -1783,6 +1803,37 @@ impl Ashell {
                             ),
                     ),
             )
+    }
+
+    fn start_sidebar_drag(&mut self, event: &MouseDownEvent, _cx: &mut Context<Self>) {
+        self.sidebar_drag_active = true;
+        self.sidebar_drag_start_x = event.position.x.into();
+        self.sidebar_start_width = self
+            .last_sidebar_width
+            .map(|s| s.as_f32())
+            .unwrap_or(SIDEBAR_WIDTH);
+    }
+
+    fn on_sidebar_drag_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if !self.sidebar_drag_active {
+            return;
+        }
+        let delta: f32 = event.position.x.into();
+        let delta = delta - self.sidebar_drag_start_x;
+        let new_width = (self.sidebar_start_width + delta).max(240.).min(520.);
+        self.last_sidebar_width = Some(px(new_width));
+        cx.notify();
+    }
+
+    fn on_sidebar_drag_end(&mut self, cx: &mut Context<Self>) {
+        if !self.sidebar_drag_active {
+            return;
+        }
+        self.sidebar_drag_active = false;
+        let width = self.last_sidebar_width.map(|s| s.as_f32()).unwrap_or(SIDEBAR_WIDTH);
+        self.config.set_layout_state(None, Some(vec![width]), None);
+        let _ = self.config.save();
+        cx.notify();
     }
 
     fn render_collapsed_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2699,44 +2750,47 @@ impl Render for Ashell {
                 )
                 .into_any_element()
         } else {
-            let sidebar_area = resizable_panel()
-                .size(px(self
-                    .config
-                    .workspace_panels()
-                    .and_then(|s| s.first().copied())
-                    .unwrap_or(SIDEBAR_WIDTH)))
-                .size_range(px(240.)..px(520.))
-                .flex_none()
-                .child(self.sidebar(cx));
+            let sidebar_width = self.last_sidebar_width.unwrap_or(px(SIDEBAR_WIDTH));
 
-            let main_area = resizable_panel().child(
-                v_flex()
-                    .size_full()
-                    .relative()
-                    .overflow_hidden()
-                    .when(
-                        self.active_title_bar_style
-                            == crate::session::config::TitleBarStyle::Native,
-                        |this| {
-                            this.child(
-                                div()
-                                    .flex_none()
-                                    .h(px(32.))
-                                    .w_full()
-                                    .bg(cx.theme().tab_bar)
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .child(self.render_tab_bar(cx)),
-                            )
-                        },
-                    )
-                    .child(body_panel),
-            );
-
-            h_resizable("ashell-workspace")
-                .with_state(&self.workspace_panels)
-                .child(sidebar_area)
-                .child(main_area)
+            h_flex()
+                .id("ashell-workspace")
+                .size_full()
+                .child(
+                    div()
+                        .flex_none()
+                        .w(sidebar_width)
+                        .h_full()
+                        .child(self.sidebar(cx)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .h_full()
+                        .child(
+                            v_flex()
+                                .size_full()
+                                .relative()
+                                .overflow_hidden()
+                                .when(
+                                    self.active_title_bar_style
+                                        == crate::session::config::TitleBarStyle::Native,
+                                    |this| {
+                                        this.child(
+                                            div()
+                                                .flex_none()
+                                                .h(px(32.))
+                                                .w_full()
+                                                .bg(cx.theme().tab_bar)
+                                                .border_b_1()
+                                                .border_color(cx.theme().border)
+                                                .child(self.render_tab_bar(cx)),
+                                        )
+                                    },
+                                )
+                                .child(body_panel),
+                        ),
+                )
                 .into_any_element()
         };
 
@@ -2906,25 +2960,43 @@ impl Render for Ashell {
             .on_prepaint({
                 let view = cx.entity().clone();
                 move |_, window, cx| {
-                    view.update(cx, |this, cx| {
-                        let current_win_size = window.viewport_size();
-                        let size_changed = this.last_window_size.map_or(true, |prev| prev != current_win_size);
-                        this.last_window_size = Some(current_win_size);
-
-                        let current_sizes = this.workspace_panels.read(cx).sizes().clone();
-                        if let Some(current_first_size) = current_sizes.first().copied() {
-                            if size_changed {
-                                if let Some(target_width) = this.last_sidebar_width {
-                                    if current_first_size != target_width {
-                                        this.workspace_panels.update(cx, |state, cx| {
-                                            state.resize_panel(0, target_width, window, cx);
-                                        });
-                                    }
-                                }
-                            } else {
-                                this.last_sidebar_width = Some(current_first_size);
+                    let entity = view.clone();
+                    window.on_mouse_event(
+                        move |ev: &MouseMoveEvent, phase, window, cx| {
+                            if !phase.bubble() {
+                                return;
                             }
-                        }
+                            let is_dragging = entity.read(cx).sidebar_drag_active;
+                            if !is_dragging {
+                                return;
+                            }
+                            cx.stop_propagation();
+                            entity.update(cx, |this, cx| {
+                                this.on_sidebar_drag_move(ev, window, cx);
+                            });
+                        },
+                    );
+
+                    let entity2 = view.clone();
+                    window.on_mouse_event(
+                        move |_: &MouseUpEvent, phase, _window, cx| {
+                            if !phase.bubble() {
+                                return;
+                            }
+                            let is_dragging = entity2.read(cx).sidebar_drag_active;
+                            if !is_dragging {
+                                return;
+                            }
+                            cx.stop_propagation();
+                            entity2.update(cx, |this, cx| {
+                                this.on_sidebar_drag_end(cx);
+                            });
+                        },
+                    );
+
+                    view.update(cx, |this, _cx| {
+                        let current_win_size = window.viewport_size();
+                        this.last_window_size = Some(current_win_size);
                     });
                 }
             })
