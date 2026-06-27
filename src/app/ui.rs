@@ -1316,25 +1316,6 @@ impl Ashell {
             .gap_4()
             .w_full()
             .p_2()
-            .relative()
-            .child(
-                div()
-                    .id("sidebar-drag-handle")
-                    .absolute()
-                    .top(px(0.0))
-                    .right(px(0.0))
-                    .h(px(20.0))
-                    .w(px(8.0))
-                    .cursor_col_resize()
-                    .rounded(px(2.0))
-                    .bg(cx.theme().border)
-                    .hover(|s| s.bg(cx.theme().accent))
-                    .on_mouse_down(MouseButton::Left, cx.listener(|this, event, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.start_sidebar_drag(event, cx);
-                    })),
-            )
             .child(
                 v_flex()
                     .gap_1()
@@ -1614,6 +1595,29 @@ impl Ashell {
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.show_settings_dialog(window, cx)
                                     })),
+                            )
+                            .child(
+                                div()
+                                    .id("sidebar-drag-handle")
+                                    .h_full()
+                                    .flex()
+                                    .items_center()
+                                    .px_1()
+                                    .cursor_col_resize()
+                                    .child(
+                                        Icon::new(IconName::Menu)
+                                            .with_size(Size::Small)
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .hover(|s| s.bg(cx.theme().accent))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, event, window, cx| {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                            this.start_sidebar_drag(event, cx);
+                                        }),
+                                    ),
                             ),
                     )
                     .child(
