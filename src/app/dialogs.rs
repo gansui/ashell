@@ -1709,6 +1709,9 @@ impl Ashell {
                                                                     .checked(view.read(cx).config.sidebar_resizable())
                                                                     .on_click(window.listener_for(&view, |this, checked, _, cx| {
                                                                         this.config.set_sidebar_resizable(*checked);
+                                                                        // 保存当前面板比例，确保关闭拖拽后比例不丢失
+                                                                        let sizes: Vec<f32> = this.workspace_panels.read(cx).sizes().iter().map(|s| (*s).into()).collect();
+                                                                        this.config.set_workspace_panels(Some(sizes));
                                                                         let _ = this.config.save();
                                                                         cx.notify();
                                                                     }))

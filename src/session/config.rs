@@ -605,6 +605,10 @@ impl ConfigStore {
         }
     }
 
+    pub fn set_workspace_panels(&mut self, workspace_panels: Option<Vec<f32>>) {
+        self.cache.workspace_panels = workspace_panels;
+    }
+
     pub fn set_layout_state(
         &mut self,
         window_bounds: Option<SavedWindowBounds>,
