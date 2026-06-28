@@ -210,6 +210,8 @@ pub struct ConfigFile {
     #[serde(default)]
     pub sidebar_collapsed: bool,
     #[serde(default)]
+    pub sidebar_resizable: bool,
+    #[serde(default)]
     pub sftp_panel_minimized: bool,
     #[serde(default)]
     pub key_bindings: std::collections::HashMap<String, String>,
@@ -324,6 +326,7 @@ impl Default for ConfigFile {
             show_hidden_files: false,
             monitoring_position: default_monitoring_position(),
             sidebar_collapsed: false,
+            sidebar_resizable: false,
             sftp_panel_minimized: false,
             key_bindings: std::collections::HashMap::new(),
             sync_endpoint: String::new(),
@@ -750,6 +753,14 @@ impl ConfigStore {
 
     pub fn set_sidebar_collapsed(&mut self, val: bool) {
         self.cache.sidebar_collapsed = val;
+    }
+
+    pub fn sidebar_resizable(&self) -> bool {
+        self.cache.sidebar_resizable
+    }
+
+    pub fn set_sidebar_resizable(&mut self, val: bool) {
+        self.cache.sidebar_resizable = val;
     }
 
     pub fn sftp_panel_minimized(&self) -> bool {

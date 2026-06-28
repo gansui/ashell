@@ -2699,45 +2699,68 @@ impl Render for Ashell {
                 )
                 .into_any_element()
         } else {
-            let sidebar_area = resizable_panel()
-                .size(px(self
-                    .config
-                    .workspace_panels()
-                    .and_then(|s| s.first().copied())
-                    .unwrap_or(SIDEBAR_WIDTH)))
-                .size_range(px(240.)..px(520.))
-                .flex_none()
-                .child(self.sidebar(cx));
+            let sidebar_width = px(self
+                .config
+                .workspace_panels()
+                .and_then(|s| s.first().copied())
+                .unwrap_or(SIDEBAR_WIDTH));
 
-            let main_area = resizable_panel().child(
-                v_flex()
+            let main_content = v_flex()
+                .size_full()
+                .relative()
+                .overflow_hidden()
+                .when(
+                    self.active_title_bar_style
+                        == crate::session::config::TitleBarStyle::Native,
+                    |this| {
+                        this.child(
+                            div()
+                                .flex_none()
+                                .h(px(32.))
+                                .w_full()
+                                .bg(cx.theme().tab_bar)
+                                .border_b_1()
+                                .border_color(cx.theme().border)
+                                .child(self.render_tab_bar(cx)),
+                        )
+                    },
+                )
+                .child(body_panel);
+
+            if self.config.sidebar_resizable() {
+                let sidebar_area = resizable_panel()
+                    .size(sidebar_width)
+                    .size_range(px(240.)..px(520.))
+                    .flex_none()
+                    .child(self.sidebar(cx));
+
+                let main_area = resizable_panel().child(main_content);
+
+                h_resizable("ashell-workspace")
+                    .with_state(&self.workspace_panels)
+                    .child(sidebar_area)
+                    .child(main_area)
+                    .into_any_element()
+            } else {
+                h_flex()
+                    .id("ashell-workspace")
                     .size_full()
-                    .relative()
-                    .overflow_hidden()
-                    .when(
-                        self.active_title_bar_style
-                            == crate::session::config::TitleBarStyle::Native,
-                        |this| {
-                            this.child(
-                                div()
-                                    .flex_none()
-                                    .h(px(32.))
-                                    .w_full()
-                                    .bg(cx.theme().tab_bar)
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .child(self.render_tab_bar(cx)),
-                            )
-                        },
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(sidebar_width)
+                            .h_full()
+                            .child(self.sidebar(cx)),
                     )
-                    .child(body_panel),
-            );
-
-            h_resizable("ashell-workspace")
-                .with_state(&self.workspace_panels)
-                .child(sidebar_area)
-                .child(main_area)
-                .into_any_element()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .h_full()
+                            .child(main_content),
+                    )
+                    .into_any_element()
+            }
         };
 
         v_flex()

@@ -1700,6 +1700,25 @@ impl Ashell {
                                                 )
                                                 .item(
                                                     SettingItem::new(
+                                                        t!("sidebar_resizable").to_string(),
+                                                        SettingField::render({
+                                                            let view = view_clone_for_general.clone();
+                                                            move |_, window, cx| {
+                                                                Switch::new("sidebar-resizable")
+                                                                    .small()
+                                                                    .checked(view.read(cx).config.sidebar_resizable())
+                                                                    .on_click(window.listener_for(&view, |this, checked, _, cx| {
+                                                                        this.config.set_sidebar_resizable(*checked);
+                                                                        let _ = this.config.save();
+                                                                        cx.notify();
+                                                                    }))
+                                                                    .into_any_element()
+                                                            }
+                                                        })
+                                                    ).description(t!("sidebar_resizable_hint").to_string())
+                                                )
+                                                .item(
+                                                    SettingItem::new(
                                                         t!("monitoring_position").to_string(),
                                                         SettingField::render({
                                                             let view = view_clone_for_general.clone();
