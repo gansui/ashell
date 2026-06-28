@@ -275,9 +275,6 @@ pub(crate) struct Ashell {
     pub(crate) terminal_selecting: bool,
     pub(crate) dragging_splitter: Option<(Vec<usize>, usize)>, // (parent_path, child_index)
     pub(crate) drag_split_origin: Option<gpui::Point<Pixels>>,
-    pub(crate) sidebar_drag_active: bool,
-    pub(crate) sidebar_drag_start_x: f32,
-    pub(crate) sidebar_start_width: f32,
     pub(crate) terminal_marked_text: Option<String>,
     pub(crate) sftp_panel_minimized: bool,
     pub(crate) sidebar_collapsed: bool,
@@ -635,9 +632,6 @@ impl Ashell {
             terminal_marked_text: None,
             dragging_splitter: None,
             drag_split_origin: None,
-            sidebar_drag_active: false,
-            sidebar_drag_start_x: 0.0,
-            sidebar_start_width: 0.0,
             sftp_panel_minimized: config.sftp_panel_minimized(),
             sidebar_collapsed: config.sidebar_collapsed(),
             collapsed_saved_scroll_handle: gpui::ScrollHandle::new(),
@@ -1136,8 +1130,12 @@ impl Ashell {
                     }
                 }
             };
-            let sidebar_width = self.last_sidebar_width.unwrap_or(px(constants::SIDEBAR_WIDTH));
-            let workspace_sizes: Vec<f32> = vec![sidebar_width.into()];
+            let workspace_sizes: Vec<f32> = self.workspace_panels
+                .read(cx)
+                .sizes()
+                .iter()
+                .map(|s| s.into())
+                .collect();
             let mut body_sizes: Vec<f32> = self.body_panels
                 .read(cx)
                 .sizes()
