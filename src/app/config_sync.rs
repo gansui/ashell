@@ -145,22 +145,25 @@ impl Ashell {
 
         cx.spawn_in(window, async move |this, mut cx| {
             if let Some(file) = file_dialog.await {
-                if let Err(e) = tokio::fs::write(file.path(), &json).await {
-                    let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
-                        let _ = this.update(cx, |this, cx| {
-                            this.sync_status = format!("{}: {e}", t!("sync_export_failed")).into();
-                            cx.notify();
-                        });
+                let path = file.path().to_path_buf();
+                let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        match std::fs::write(&path, &json) {
+                            Ok(()) => {
+                                this.sync_status = t!(
+                                    "sync_export_success",
+                                    path = path.to_string_lossy().to_string()
+                                )
+                                .into();
+                            }
+                            Err(e) => {
+                                this.sync_status =
+                                    format!("{}: {e}", t!("sync_export_failed")).into();
+                            }
+                        }
+                        cx.notify();
                     });
-                } else {
-                    let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
-                        let _ = this.update(cx, |this, cx| {
-                            this.sync_status =
-                                t!("sync_export_success", path = file.path().to_string_lossy().to_string()).into();
-                            cx.notify();
-                        });
-                    });
-                }
+                });
             }
             Ok::<(), anyhow::Error>(())
         })
@@ -175,7 +178,8 @@ impl Ashell {
 
         cx.spawn_in(window, async move |this, mut cx| {
             if let Some(file) = file_dialog.await {
-                let content = match tokio::fs::read_to_string(file.path()).await {
+                let path = file.path().to_path_buf();
+                let content = match std::fs::read_to_string(&path) {
                     Ok(c) => c,
                     Err(e) => {
                         let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
@@ -195,17 +199,16 @@ impl Ashell {
                             Ok(()) => {
                                 this.sync_status = t!(
                                     "sync_import_success",
-                                    path = file.path().to_string_lossy().to_string()
+                                    path = path.to_string_lossy().to_string()
                                 )
                                 .into();
-                                cx.notify();
                             }
                             Err(e) => {
                                 this.sync_status =
                                     format!("{}: {e}", t!("sync_import_invalid")).into();
-                                cx.notify();
                             }
                         }
+                        cx.notify();
                     });
                 });
             }
