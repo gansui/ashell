@@ -495,7 +495,8 @@ impl TerminalTab {
             .replace("\r\n", "\r")
             .replace('\n', "\r");
 
-        let paste_text = if bracketed {
+        let use_bracketed = bracketed && text.contains('\n');
+        let paste_text = if use_bracketed {
             format!("\x1b[200~{}\x1b[201~", cleaned)
         } else {
             cleaned
