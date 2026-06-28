@@ -1,4 +1,4 @@
-use gpui::{Context, Entity, SharedString};
+use gpui::{Context, Entity, SharedString, Window};
 use gpui_component::input::InputState;
 use rust_i18n::t;
 
@@ -125,5 +125,92 @@ impl Ashell {
             };
             let _ = events.send(BackendEvent::SyncFinished(result));
         });
+    }
+
+    pub(crate) fn export_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let json = match self.config.raw_json() {
+            Ok(j) => j,
+            Err(e) => {
+                self.sync_status = format!("{}: {e}", t!("sync_export_failed")).into();
+                cx.notify();
+                return;
+            }
+        };
+
+        let file_dialog = rfd::AsyncFileDialog::new()
+            .set_title(t!("sync_export_config").to_string())
+            .add_filter("JSON", &["json"])
+            .set_file_name("sessions.json")
+            .save_file();
+
+        cx.spawn_in(window, async move |this, mut cx| {
+            if let Some(file) = file_dialog.await {
+                if let Err(e) = tokio::fs::write(file.path(), &json).await {
+                    let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            this.sync_status = format!("{}: {e}", t!("sync_export_failed")).into();
+                            cx.notify();
+                        });
+                    });
+                } else {
+                    let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            this.sync_status =
+                                t!("sync_export_success", path = file.path().to_string_lossy().to_string()).into();
+                            cx.notify();
+                        });
+                    });
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .detach();
+    }
+
+    pub(crate) fn import_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let file_dialog = rfd::AsyncFileDialog::new()
+            .set_title(t!("sync_import_config").to_string())
+            .add_filter("JSON", &["json"])
+            .pick_file();
+
+        cx.spawn_in(window, async move |this, mut cx| {
+            if let Some(file) = file_dialog.await {
+                let content = match tokio::fs::read_to_string(file.path()).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
+                            let _ = this.update(cx, |this, cx| {
+                                this.sync_status =
+                                    format!("{}: {e}", t!("sync_import_failed")).into();
+                                cx.notify();
+                            });
+                        });
+                        return Ok::<(), anyhow::Error>(());
+                    }
+                };
+
+                let _ = gpui::AsyncWindowContext::update(&mut cx, |_, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        match this.config.replace_config(&content) {
+                            Ok(()) => {
+                                this.sync_status = t!(
+                                    "sync_import_success",
+                                    path = file.path().to_string_lossy().to_string()
+                                )
+                                .into();
+                                cx.notify();
+                            }
+                            Err(e) => {
+                                this.sync_status =
+                                    format!("{}: {e}", t!("sync_import_invalid")).into();
+                                cx.notify();
+                            }
+                        }
+                    });
+                });
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .detach();
     }
 }

@@ -1911,6 +1911,8 @@ impl Ashell {
                                                             .child(
                                                                 h_flex()
                                                                     .gap_2()
+                                                                    .child(Button::new("sync-export").small().label(t!("sync_export_config").to_string()).on_click(window.listener_for(&view, |this, _, w, cx| this.export_config(w, cx))))
+                                                                    .child(Button::new("sync-import").small().label(t!("sync_import_config").to_string()).on_click(window.listener_for(&view, |this, _, w, cx| this.import_config(w, cx))))
                                                                     .child(Button::new("sync-download").small().disabled(in_progress).label(t!("sync_download").to_string()).on_click(window.listener_for(&view, |this, _, _, cx| this.download_sync_config(cx))))
                                                                     .child(Button::new("sync-upload").small().disabled(in_progress).label(t!("sync_upload").to_string()).on_click(window.listener_for(&view, |this, _, _, cx| this.upload_sync_config(cx)))),
                                                             )

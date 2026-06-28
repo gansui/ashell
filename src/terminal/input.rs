@@ -143,9 +143,12 @@ impl Ashell {
                     && !event.keystroke.modifiers.platform
                 {
                     self.send_terminal_input(text.as_bytes().to_vec(), window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
                 }
             }
-            return;
         }
 
         let Some(active_id) = self.active_tab.clone() else {

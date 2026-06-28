@@ -787,6 +787,24 @@ impl ConfigStore {
         self.cache.sessions.retain(|s| s.id != id);
     }
 
+    pub fn raw_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(&self.cache).map_err(Into::into)
+    }
+
+    pub fn from_json(json: &str) -> Result<ConfigFile> {
+        serde_json::from_str::<ConfigFile>(json).map_err(Into::into)
+    }
+
+    pub fn replace_config(&mut self, json: &str) -> Result<()> {
+        let config: ConfigFile = Self::from_json(json)?;
+        self.cache = config;
+        self.save()
+    }
+
+    pub fn config_file_path(&self) -> &PathBuf {
+        &self.path
+    }
+
     pub fn save(&self) -> Result<()> {
         if self.path.as_os_str().is_empty() {
             return Ok(());
