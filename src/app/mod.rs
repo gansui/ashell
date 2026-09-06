@@ -1283,7 +1283,14 @@ impl Ashell {
     }
 
     fn on_window_activation_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let was_active = self.window_active;
         self.sync_window_activation(window);
+        // 窗口从非激活变为激活时，主动调用 activate_window() 确保窗口被带到前台。
+        // 在 Windows 上，任务栏点击触发的 WM_ACTIVATE 可能因前台窗口锁定机制
+        // 无法将窗口带到前台，activate_window() 中的 VK_MENU hack 可以绕过此限制。
+        if !was_active && self.window_active {
+            window.activate_window();
+        }
         cx.notify();
     }
 
