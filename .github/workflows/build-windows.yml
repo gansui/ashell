@@ -33,7 +33,7 @@ jobs:
           $basename = "ashell-v${version}-dev.${sha}-windows-x64"
           $bin = "target\x86_64-pc-windows-msvc\release\ashell.exe"
 
-          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
+          New-Item -ItemType Directory -Path "dist\${basename}" -Force | Out-Null
           Copy-Item $bin "dist\${basename}\ashell.exe"
           Compress-Archive -Path "dist\${basename}" -DestinationPath "dist\${basename}-portable.zip"
           Remove-Item -Recurse "dist\${basename}"
