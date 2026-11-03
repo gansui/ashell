@@ -4657,8 +4657,10 @@ impl Ashell {
                                                         ),
                                                 )
                                                 .cursor_pointer()
-                                                .on_mouse_down(MouseButton::Left, |_, window, _| {
+                                                .on_mouse_down(MouseButton::Left, |_, window, cx| {
                                                     window.prevent_default();
+                                                    // 阻止冒泡到融合标题栏的窗口拖动区，避免点击被拖动吞掉
+                                                    cx.stop_propagation();
                                                 })
                                                 .on_click(cx.listener(
                                                     move |this, _, window, cx| {
