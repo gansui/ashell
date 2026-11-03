@@ -5151,6 +5151,10 @@ impl Ashell {
                     )
                     .on_mouse_move(cx.listener(Self::on_terminal_mouse_move))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::on_terminal_mouse_up))
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(Self::on_terminal_mouse_up_out),
+                    )
                     .on_key_down(cx.listener(Self::on_terminal_key_down))
                     .on_action(cx.listener(Self::on_terminal_tab_action))
                     .on_action(cx.listener(Self::on_terminal_backtab_action))

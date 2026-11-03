@@ -695,7 +695,8 @@ impl Ashell {
             cx.notify();
         }
 
-        if !self.terminal_selecting || event.pressed_button != Some(MouseButton::Left) {
+        // 只依赖 terminal_selecting：部分平台/鼠标上报场景下 move 事件不带 pressed_button
+        if !self.terminal_selecting {
             return;
         }
         let Some((row, col, side)) = self.terminal_grid_point_and_side(event.position) else {
@@ -764,6 +765,19 @@ impl Ashell {
         }
         self.terminal_selecting = false;
         cx.notify();
+    }
+
+    // 鼠标在窗口外松开时收不到 on_mouse_up，这里兜底复位拖动状态
+    pub(crate) fn on_terminal_mouse_up_out(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.terminal_selecting {
+            self.terminal_selecting = false;
+            cx.notify();
+        }
     }
 
     pub(crate) fn terminal_grid_point_and_side(

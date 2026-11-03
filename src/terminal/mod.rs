@@ -895,6 +895,10 @@ pub struct TerminalTab {
     should_cleanup_initial_blank_scrollback: bool,
     pub scroll_pixel_y: f32,
     pub(crate) highlight_cache: HighlightCache,
+    // 拖动选择的锚点与类型：TUI 高频重绘可能清掉 term.selection，用于重建选区
+    drag_selection_anchor: Option<Point>,
+    drag_selection_last: Option<Point>,
+    drag_selection_type: SelectionType,
 }
 
 type HighlightCache = std::cell::RefCell<
@@ -1886,6 +1890,9 @@ impl TerminalTab {
             should_cleanup_initial_blank_scrollback: cfg!(windows) && kind == TabKind::Local,
             scroll_pixel_y: 0.0,
             highlight_cache: std::cell::RefCell::new(None),
+            drag_selection_anchor: None,
+            drag_selection_last: None,
+            drag_selection_type: SelectionType::Simple,
         }
     }
 
@@ -1905,6 +1912,16 @@ impl TerminalTab {
         }
         self.processor
             .advance(&mut self.term, &decoded[processed_until..]);
+        // 部分 TUI 会在重绘时清空选区，拖动期间用锚点恢复，避免“选不上”
+        if self.term.selection.is_none() {
+            if let (Some(anchor), Some(last)) =
+                (self.drag_selection_anchor, self.drag_selection_last)
+            {
+                let mut selection = Selection::new(self.drag_selection_type, anchor, Side::Left);
+                selection.update(last, Side::Left);
+                self.term.selection = Some(selection);
+            }
+        }
         self.cleanup_initial_blank_scrollback();
         self.reconcile_click_cursor_prediction(Instant::now());
         notifications
@@ -2380,6 +2397,8 @@ impl TerminalTab {
 
     pub fn clear_selection(&mut self) {
         self.term.selection = None;
+        self.drag_selection_anchor = None;
+        self.drag_selection_last = None;
     }
 
     pub fn selection_text(&self) -> Option<String> {
@@ -2399,6 +2418,9 @@ impl TerminalTab {
             self.term.grid().display_offset(),
             Point::new(row, Column(col)),
         );
+        self.drag_selection_anchor = Some(point);
+        self.drag_selection_last = Some(point);
+        self.drag_selection_type = selection_type;
         self.term.selection = Some(Selection::new(selection_type, point, side));
     }
 
@@ -2407,6 +2429,14 @@ impl TerminalTab {
             self.term.grid().display_offset(),
             Point::new(row, Column(col)),
         );
+        // 部分 TUI 会在重绘时清空选区，此时用拖动锚点重建，避免“选不上”
+        if self.term.selection.is_none() {
+            if let Some(anchor) = self.drag_selection_anchor {
+                self.term.selection =
+                    Some(Selection::new(self.drag_selection_type, anchor, Side::Left));
+            }
+        }
+        self.drag_selection_last = Some(point);
         if let Some(selection) = self.term.selection.as_mut() {
             selection.update(point, side);
         }

@@ -2047,7 +2047,8 @@ impl Ashell {
             }
         }
         if event.button == MouseButton::Left {
-            if event.modifiers.platform {
+            // Shift+左键强制本地选择，不触发 URL 打开
+            if event.modifiers.platform && !event.modifiers.shift {
                 if let Some((row, col, _side)) = self.terminal_grid_point_and_side(event.position) {
                     if let Some(snapshot) = self.active_snapshot() {
                         if let Some((url, _)) = crate::terminal::highlight::find_url_at_cell(
