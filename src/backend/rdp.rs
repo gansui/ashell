@@ -14,9 +14,11 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use rdp::core::client::Connector;
-use rdp::core::event::RdpEvent;
+use rdp::core::event::{KeyboardEvent, PointerButton, PointerEvent, RdpEvent};
 
-use crate::terminal::{BackendCommand, BackendEvent, BackendTx, GuardedBackendEventSender};
+use crate::terminal::{
+    BackendCommand, BackendEvent, BackendTx, GuardedBackendEventSender, RdpInputEvent,
+};
 
 /// Start an RDP session on a dedicated OS thread.
 ///
@@ -110,6 +112,30 @@ fn run_rdp(
             match cmd {
                 BackendCommand::Close => {
                     is_shutdown = true;
+                }
+                BackendCommand::RdpInput(event) => {
+                    match event {
+                        RdpInputEvent::Pointer(p) => {
+                            let button = match p.button {
+                                crate::terminal::RdpPointerButton::Left => PointerButton::Left,
+                                crate::terminal::RdpPointerButton::Right => PointerButton::Right,
+                                crate::terminal::RdpPointerButton::Middle => PointerButton::Middle,
+                                crate::terminal::RdpPointerButton::None => PointerButton::None,
+                            };
+                            let _ = client.write(RdpEvent::Pointer(PointerEvent {
+                                x: p.x,
+                                y: p.y,
+                                button,
+                                down: p.down,
+                            }));
+                        }
+                        RdpInputEvent::Key(k) => {
+                            let _ = client.write(RdpEvent::Key(KeyboardEvent {
+                                code: k.code,
+                                down: k.down,
+                            }));
+                        }
+                    }
                 }
                 _ => {}
             }

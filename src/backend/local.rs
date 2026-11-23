@@ -628,7 +628,8 @@ pub fn spawn_local_terminal_at(
                     BackendCommand::SampleMetrics
                     | BackendCommand::SampleProcesses
                     | BackendCommand::SamplePorts
-                    | BackendCommand::TerminateProcess { .. } => {}
+                    | BackendCommand::TerminateProcess { .. }
+                    | BackendCommand::RdpInput(_) => {}
                 },
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if let Ok(Some(status)) = child.try_wait() {

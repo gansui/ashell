@@ -95,7 +95,8 @@ pub fn spawn_serial_client(
                     | BackendCommand::SampleMetrics
                     | BackendCommand::SampleProcesses
                     | BackendCommand::SamplePorts
-                    | BackendCommand::TerminateProcess { .. } => {}
+                    | BackendCommand::TerminateProcess { .. }
+                    | BackendCommand::RdpInput(_) => {}
                 }
             }
         });

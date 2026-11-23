@@ -667,10 +667,41 @@ fn sanitize_notification_text(text: &str) -> Option<String> {
         .then(|| sanitized.to_string())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RdpPointerButton {
+    None,
+    Left,
+    Right,
+    Middle,
+}
+
+#[derive(Debug, Clone)]
+pub struct RdpPointerInput {
+    pub x: u16,
+    pub y: u16,
+    pub button: RdpPointerButton,
+    pub down: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RdpKeyInput {
+    /// RDP scancode of the key.
+    pub code: u16,
+    pub down: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum RdpInputEvent {
+    Pointer(RdpPointerInput),
+    Key(RdpKeyInput),
+}
+
 #[derive(Debug)]
 pub enum BackendCommand {
     Input(Vec<u8>),
     Resize { cols: u16, rows: u16 },
+    /// RDP remote-desktop input (pointer/keyboard) to forward to the server.
+    RdpInput(RdpInputEvent),
     SampleMetrics,
     SampleProcesses,
     SamplePorts,
