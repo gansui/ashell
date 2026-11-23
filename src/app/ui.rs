@@ -8,7 +8,7 @@ use crate::app::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui::{
     Anchor, Animation, AnimationExt as _, AppContext as _, Context, DismissEvent, ElementId, Empty,
     Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement as _, PathBuilder, Pixels, Render,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, PathBuilder, Pixels, Render,
     StatefulInteractiveElement as _, Styled as _, Window, bounce, canvas, div, ease_in_out, hsla,
     point, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
@@ -486,6 +486,26 @@ impl Ashell {
         })
     }
 
+    /// Send a mouse pointer event to the RDP backend of the given tab.
+    fn send_rdp_pointer(
+        &mut self,
+        tab_id: &str,
+        position: gpui::Point<gpui::Pixels>,
+        button: crate::terminal::RdpPointerButton,
+        down: bool,
+    ) {
+        if let Some(tab) = self.tabs.iter().find(|t| &t.id == tab_id) {
+            tab.send_backend(crate::terminal::BackendCommand::RdpInput(
+                crate::terminal::RdpInputEvent::Pointer(crate::terminal::RdpPointerInput {
+                    x: position.x.as_f32().clamp(0.0, u16::MAX as f32) as u16,
+                    y: position.y.as_f32().clamp(0.0, u16::MAX as f32) as u16,
+                    button,
+                    down,
+                }),
+            ));
+        }
+    }
+
     /// Render the remote-desktop view for an RDP tab.
     ///
     /// The decoded RGBA frame is accumulated in `self.rdp_frames[tab_id]`. A
@@ -525,6 +545,36 @@ impl Ashell {
             .size_full()
             .bg(cx.theme().tab_bar)
             .overflow_hidden()
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, _| {
+                this.send_rdp_pointer(
+                    tab_id,
+                    event.position,
+                    crate::terminal::RdpPointerButton::None,
+                    false,
+                );
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _, _| {
+                    this.send_rdp_pointer(
+                        tab_id,
+                        event.position,
+                        crate::terminal::RdpPointerButton::Left,
+                        true,
+                    );
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseUpEvent, _, _| {
+                    this.send_rdp_pointer(
+                        tab_id,
+                        event.position,
+                        crate::terminal::RdpPointerButton::Left,
+                        false,
+                    );
+                }),
+            )
             .child(
                 v_flex()
                     .size_full()

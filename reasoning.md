@@ -205,7 +205,25 @@ rdp-rs **没有实现剪贴板虚拟通道**，需要自己补：
 
 ## 十二、剩余工作（待后续）
 
-- **真实位图渲染**：用 GPUI 图像元素绘制 `rdp_frames` 的 RGBA，替换 `render_rdp_pane` 的占位。依赖 GPUI 图像渲染 API 确认。
+- **真实位图渲染**：用 GPUI 图像元素绘制 `rdp_frames` 的 RGBA，替换 `render_rdp_pane` 的占位。已确认 ui.rs 导入了 `canvas`（GPUI 图像绘制能力），下一步用它绘制位图。
 - **RDP 域名输入框**：在新建连接对话框加 `domain` 字段，`connect_ssh` 的 RDP 分支读取。
+- **RDP 键盘输入转发**：`render_rdp_pane` 的 `on_key_down` → `RdpClient::write`（Key），需 scancode 映射。
 - **CLIPRDR 剪贴板通道**：按 MS-RDPECLIP 自研 RDP 虚拟通道，把宿主剪贴板文本传给远端。
-- **RDP 输入转发**：鼠标/键盘事件 → `RdpClient::write`（Pointer/Key）。
+
+## 十三、阶段 6（输入转发）实际改动（已完成，待编译验证）
+
+1. **`src/terminal/mod.rs`**：
+   - 新增 `RdpPointerButton`/`RdpPointerInput`/`RdpKeyInput`/`RdpInputEvent` 类型
+   - `BackendCommand` 新增 `RdpInput(RdpInputEvent)` 变体
+
+2. **`src/backend/rdp.rs`**：
+   - import 增加 `KeyboardEvent`/`PointerButton`/`PointerEvent` 和 `RdpInputEvent`
+   - 命令循环新增 `BackendCommand::RdpInput` 分支：把 `RdpInputEvent::Pointer`/`Key` 转成 `RdpEvent` 调用 `client.write`
+
+3. **`src/backend/local.rs`/`serial.rs`**：`BackendCommand` 兜底分支加 `| BackendCommand::RdpInput(_)`（非 RDP 后端忽略）
+
+4. **`src/backend/ssh.rs`**：加 `Some(BackendCommand::RdpInput(_))` 忽略分支
+
+5. **`src/app/ui.rs`**：
+   - 新增 `send_rdp_pointer` 辅助方法（把鼠标位置/按钮转成 `BackendCommand::RdpInput::Pointer` 发给 tab 后端）
+   - `render_rdp_pane` 给 el 加 `on_mouse_move`/`on_mouse_down`/`on_mouse_up`，转发鼠标事件到 RDP 后端
