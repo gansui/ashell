@@ -226,4 +226,22 @@ rdp-rs **没有实现剪贴板虚拟通道**，需要自己补：
 
 5. **`src/app/ui.rs`**：
    - 新增 `send_rdp_pointer` 辅助方法（把鼠标位置/按钮转成 `BackendCommand::RdpInput::Pointer` 发给 tab 后端）
+
+## 十四、阶段 7（鼠标右键/中键 + 键盘转发）实际改动（已完成，待编译验证）
+
+1. **`src/app/ui.rs`**：
+   - 新增 `rdp_scancode_for_key(key: &str) -> Option<u16>` 模块级函数：把 GPUI key 字符串（如 `"a"`/`"escape"`/`"up"`）映射到 Windows 键盘 scancode（Set 1），供 RDP 键盘输入协议使用
+   - 新增 `send_rdp_key(&mut self, tab_id, scancode, down)` 辅助方法：发 `BackendCommand::RdpInput::Key`
+   - import 增加 `KeyDownEvent`/`KeyUpEvent`
+   - `render_rdp_pane` 补 `on_mouse_down/up(MouseButton::Right/Middle)`（右键/中键操作）
+   - `render_rdp_pane` 给 el 加 `.focusable(self.focus_handle.clone())` + `on_key_down`/`on_key_up`：把 GPUI 按键转成 RDP scancode 发送
+
+**说明**：这消掉了 `RdpPointerButton::Right/Middle never constructed` 和 `RdpInputEvent::Key never constructed` 告警。`LocalDirectoryChanged never constructed` 是原有告警（与 RDP 无关），未动。RDP 键盘输入使用 scancode（Set 1），GPUI 方向键等命名键的字符串格式（`"up"`/`"arrowup"` 等）已做多猜测兼容，需在 GitHub 编译验证。
+
+**已完成**：RDP 连接 / tab 创建 / 会话保存恢复 / 渲染面板 / 新建连接 UI / 鼠标（左中右）输入 / 键盘输入转发。
+
+**剩余工作**：
+- 真实位图渲染（GPUI `canvas` 绘制 `rdp_frames` RGBA）
+- RDP 域名输入框
+- CLIPRDR 剪贴板通道
    - `render_rdp_pane` 给 el 加 `on_mouse_move`/`on_mouse_down`/`on_mouse_up`，转发鼠标事件到 RDP 后端

@@ -8,7 +8,7 @@ use crate::app::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui::{
     Anchor, Animation, AnimationExt as _, AppContext as _, Context, DismissEvent, ElementId, Empty,
     Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, PathBuilder, Pixels, Render,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, KeyDownEvent, KeyUpEvent, ParentElement as _, PathBuilder, Pixels, Render,
     StatefulInteractiveElement as _, Styled as _, Window, bounce, canvas, div, ease_in_out, hsla,
     point, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
@@ -42,6 +42,43 @@ use crate::{
     terminal::{self, TabKind, TerminalTab},
     text_encoding::TERMINAL_ENCODINGS,
 };
+
+/// Map a GPUI key string (as reported by `KeyDownEvent.keystroke.key`) to a
+/// Windows keyboard scancode (Set 1) used by the RDP keyboard-input protocol.
+fn rdp_scancode_for_key(key: &str) -> Option<u16> {
+    let key = key.to_ascii_lowercase();
+    let code = match key.as_str() {
+        // Letters (QWERTY).
+        "q" => 0x10, "w" => 0x11, "e" => 0x12, "r" => 0x13, "t" => 0x14,
+        "y" => 0x15, "u" => 0x16, "i" => 0x17, "o" => 0x18, "p" => 0x19,
+        "a" => 0x1e, "s" => 0x1f, "d" => 0x20, "f" => 0x21, "g" => 0x22,
+        "h" => 0x23, "j" => 0x24, "k" => 0x25, "l" => 0x26,
+        "z" => 0x2c, "x" => 0x2d, "c" => 0x2e, "v" => 0x2f, "b" => 0x30,
+        "n" => 0x31, "m" => 0x32,
+        // Digits.
+        "1" => 0x02, "2" => 0x03, "3" => 0x04, "4" => 0x05, "5" => 0x06,
+        "6" => 0x07, "7" => 0x08, "8" => 0x09, "9" => 0x0a, "0" => 0x0b,
+        // Symbols.
+        "-" => 0x0c, "=" => 0x0d, "[" => 0x1a, "]" => 0x1b, "\\" => 0x2b,
+        ";" => 0x27, "'" => 0x28, "`" => 0x29, "," => 0x33, "." => 0x34,
+        "/" => 0x35,
+        // Named keys.
+        "escape" => 0x01, "tab" => 0x0f, "backspace" => 0x0e, "enter" => 0x1c,
+        "space" => 0x39, "caps" | "capslock" => 0x3a,
+        "f1" => 0x3b, "f2" => 0x3c, "f3" => 0x3d, "f4" => 0x3e,
+        "f5" => 0x3f, "f6" => 0x40, "f7" => 0x41, "f8" => 0x42,
+        "f9" => 0x43, "f10" => 0x44, "f11" => 0x57, "f12" => 0x58,
+        "up" | "arrowup" => 0xe048, "down" | "arrowdown" => 0xe050,
+        "left" | "arrowleft" => 0xe04b, "right" | "arrowright" => 0xe04d,
+        "home" => 0xe047, "end" => 0xe04f,
+        "pageup" => 0xe049, "pagedown" => 0xe051,
+        "delete" => 0xe053, "insert" => 0xe052,
+        "shift" => 0x2a, "control" | "ctrl" => 0x1d, "alt" => 0x38,
+        "meta" | "cmd" => 0xe05b,
+        _ => return None,
+    };
+    Some(code)
+}
 
 fn flashing_terminal_notification_icon(tab_index: usize, color: Hsla) -> impl IntoElement {
     Icon::new(IconName::Bell)
@@ -506,6 +543,18 @@ impl Ashell {
         }
     }
 
+    /// Send a keyboard event to the RDP backend of the given tab.
+    fn send_rdp_key(&mut self, tab_id: &str, scancode: u16, down: bool) {
+        if let Some(tab) = self.tabs.iter().find(|t| &t.id == tab_id) {
+            tab.send_backend(crate::terminal::BackendCommand::RdpInput(
+                crate::terminal::RdpInputEvent::Key(crate::terminal::RdpKeyInput {
+                    code: scancode,
+                    down,
+                }),
+            ));
+        }
+    }
+
     /// Render the remote-desktop view for an RDP tab.
     ///
     /// The decoded RGBA frame is accumulated in `self.rdp_frames[tab_id]`. A
@@ -549,6 +598,25 @@ impl Ashell {
             .size_full()
             .bg(cx.theme().tab_bar)
             .overflow_hidden()
+            .focusable(self.focus_handle.clone())
+            .on_key_down(cx.listener({
+                let tid = tab_id_owned.clone();
+                move |this, event: &KeyDownEvent, _, _| {
+                    let key_str = event.keystroke.key.to_ascii_lowercase();
+                    if let Some(code) = rdp_scancode_for_key(&key_str) {
+                        this.send_rdp_key(&tid, code, true);
+                    }
+                }
+            }))
+            .on_key_up(cx.listener({
+                let tid = tab_id_owned.clone();
+                move |this, event: &KeyUpEvent, _, _| {
+                    let key_str = event.keystroke.key.to_ascii_lowercase();
+                    if let Some(code) = rdp_scancode_for_key(&key_str) {
+                        this.send_rdp_key(&tid, code, false);
+                    }
+                }
+            }))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, _| {
                 this.send_rdp_pointer(
                     &rdp_tab_move,
@@ -577,6 +645,62 @@ impl Ashell {
                         crate::terminal::RdpPointerButton::Left,
                         false,
                     );
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let tid = tab_id_owned.clone();
+                    move |this, event: &MouseDownEvent, _, _| {
+                        this.send_rdp_pointer(
+                            &tid,
+                            event.position,
+                            crate::terminal::RdpPointerButton::Right,
+                            true,
+                        );
+                    }
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Right,
+                cx.listener({
+                    let tid = tab_id_owned.clone();
+                    move |this, event: &MouseUpEvent, _, _| {
+                        this.send_rdp_pointer(
+                            &tid,
+                            event.position,
+                            crate::terminal::RdpPointerButton::Right,
+                            false,
+                        );
+                    }
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener({
+                    let tid = tab_id_owned.clone();
+                    move |this, event: &MouseDownEvent, _, _| {
+                        this.send_rdp_pointer(
+                            &tid,
+                            event.position,
+                            crate::terminal::RdpPointerButton::Middle,
+                            true,
+                        );
+                    }
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener({
+                    let tid = tab_id_owned.clone();
+                    move |this, event: &MouseUpEvent, _, _| {
+                        this.send_rdp_pointer(
+                            &tid,
+                            event.position,
+                            crate::terminal::RdpPointerButton::Middle,
+                            false,
+                        );
+                    }
                 }),
             )
             .child(
