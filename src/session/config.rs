@@ -48,6 +48,9 @@ pub struct Session {
     pub auth: AuthMethod,
     #[serde(default)]
     pub password: String,
+    /// Windows domain, used for RDP connections.
+    #[serde(default)]
+    pub domain: String,
     #[serde(default)]
     pub private_key_path: String,
     #[serde(default)]
@@ -86,6 +89,7 @@ impl Session {
             user,
             auth: AuthMethod::Password,
             password,
+            domain: String::new(),
             private_key_path: String::new(),
             private_key_inline: String::new(),
             passphrase: String::new(),
@@ -119,6 +123,7 @@ impl Session {
             user,
             auth: AuthMethod::Key,
             password: String::new(),
+            domain: String::new(),
             private_key_path,
             private_key_inline,
             passphrase,
@@ -145,6 +150,7 @@ impl Session {
             user: String::new(),
             auth: AuthMethod::Password,
             password: String::new(),
+            domain: String::new(),
             private_key_path: String::new(),
             private_key_inline: String::new(),
             passphrase: String::new(),
@@ -156,6 +162,37 @@ impl Session {
             proxy_password: String::new(),
             protocol: "serial".to_string(),
             baud_rate,
+            terminal_encoding: TextEncoding::Utf8,
+        }
+    }
+
+    /// Create a new RDP session.
+    ///
+    /// `domain` is the Windows domain (may be empty for local accounts),
+    /// `user`/`password` are the remote credentials, and `port` defaults to 3389.
+    pub fn rdp(host: String, port: u16, domain: String, user: String, password: String) -> Self {
+        let name = format!("{user}@{host}");
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name,
+            group: String::new(),
+            host,
+            port,
+            user,
+            auth: AuthMethod::Password,
+            password,
+            domain,
+            private_key_path: String::new(),
+            private_key_inline: String::new(),
+            passphrase: String::new(),
+            last_used: None,
+            proxy_type: "none".to_string(),
+            proxy_host: String::new(),
+            proxy_port: None,
+            proxy_user: String::new(),
+            proxy_password: String::new(),
+            protocol: "rdp".to_string(),
+            baud_rate: 0,
             terminal_encoding: TextEncoding::Utf8,
         }
     }
@@ -2086,6 +2123,7 @@ mod tests {
             user: "root".to_string(),
             auth: AuthMethod::Password,
             password: "pwd".to_string(),
+            domain: String::new(),
             private_key_path: String::new(),
             private_key_inline: String::new(),
             passphrase: String::new(),

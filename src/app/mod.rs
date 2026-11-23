@@ -436,8 +436,61 @@ pub(crate) struct Ashell {
     pub(crate) cmd_ctrl_pressed: bool,
     pub(crate) _subscriptions: Vec<gpui::Subscription>,
     pub(crate) last_window_bounds: Option<gpui::WindowBounds>,
+    /// Accumulated RGBA frame buffers for RDP remote desktop tabs.
+    pub(crate) rdp_frames: HashMap<String, RdpFrameState>,
     pub(crate) save_lock: std::sync::Arc<std::sync::Mutex<()>>,
     pub(crate) save_latest_seq: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Holds the accumulated RGBA frame buffer for an RDP remote desktop tab.
+///
+/// RDP delivers desktop updates as individual bitmap regions that can arrive
+/// out of order; the UI composits them onto this full-screen buffer.
+#[derive(Clone, Default)]
+pub(crate) struct RdpFrameState {
+    pub(crate) width: u16,
+    pub(crate) height: u16,
+    /// RGBA pixels, row-major, top to bottom, `width * height * 4` bytes.
+    pub(crate) rgba: Vec<u8>,
+    /// Whether at least one bitmap region has been received.
+    pub(crate) has_frame: bool,
+}
+
+impl RdpFrameState {
+    /// Apply one decoded bitmap region onto the frame buffer.
+    pub(crate) fn apply_bitmap(
+        &mut self,
+        x: u16,
+        y: u16,
+        region_width: u16,
+        region_height: u16,
+        rgba: &[u8],
+    ) {
+        let frame_width = self.width as usize;
+        let region_w = region_width as usize;
+        let region_h = region_height as usize;
+        let expected = region_w * region_h * 4;
+        if rgba.len() < expected {
+            return;
+        }
+        for row in 0..region_h {
+            let dst_row = y as usize + row;
+            if dst_row >= self.height as usize {
+                break;
+            }
+            let dst_offset = (dst_row * frame_width + x as usize) * 4;
+            let src_offset = row * region_w * 4;
+            for col in 0..region_w {
+                let di = dst_offset + col * 4;
+                let si = src_offset + col * 4;
+                if di + 4 > self.rgba.len() {
+                    break;
+                }
+                self.rgba[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+            }
+        }
+        self.has_frame = true;
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -959,6 +1012,7 @@ impl Ashell {
             cmd_ctrl_pressed: false,
             _subscriptions,
             last_window_bounds: Some(window.window_bounds()),
+            rdp_frames: HashMap::new(),
             save_lock: std::sync::Arc::new(std::sync::Mutex::new(())),
             save_latest_seq: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         };
@@ -1677,6 +1731,30 @@ impl Ashell {
                         self.pending_sftp_path_sync = Some(home);
                         self.sync_sftp_path_from_terminal_title(&tab_id, cx);
                     }
+                }
+                BackendEvent::RdpBitmap {
+                    tab_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba,
+                } => {
+                    let frame = self.rdp_frames.entry(tab_id.clone()).or_default();
+                    // If the frame buffer is not yet sized, size it from the first
+                    // bitmap region. A full desktop region typically spans the screen.
+                    if frame.width == 0 || frame.height == 0 {
+                        frame.width = width;
+                        frame.height = height;
+                        frame.rgba = vec![0; width as usize * height as usize * 4];
+                    }
+                    frame.apply_bitmap(x, y, width, height, &rgba);
+                }
+                BackendEvent::RdpStatus { tab_id, text } => {
+                    if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+                        tab.status = text.clone();
+                    }
+                    self.status = text.into();
                 }
                 BackendEvent::TerminalTitleChanged { tab_id, title } => {
                     let local_path = crate::session::parse_local_directory_title(&title);

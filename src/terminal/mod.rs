@@ -760,6 +760,25 @@ pub enum BackendEvent {
         tab_id: String,
         info: TransferInfo,
     },
+    /// A decoded RDP desktop bitmap region (RGBA pixels) for a remote desktop tab.
+    RdpBitmap {
+        tab_id: String,
+        /// Left pixel coordinate of the destination region.
+        x: u16,
+        /// Top pixel coordinate of the destination region.
+        y: u16,
+        /// Destination region width in pixels.
+        width: u16,
+        /// Destination region height in pixels.
+        height: u16,
+        /// Raw RGBA pixel data (4 bytes per pixel, row-major, top to bottom).
+        rgba: Vec<u8>,
+    },
+    /// RDP session status update (progress / diagnostics text).
+    RdpStatus {
+        tab_id: String,
+        text: String,
+    },
     Closed {
         tab_id: String,
         reason: String,
@@ -848,6 +867,8 @@ pub enum BackendTx {
     Local(Sender<BackendCommand>),
     Ssh(tokio::sync::mpsc::UnboundedSender<BackendCommand>),
     Serial(tokio::sync::mpsc::UnboundedSender<BackendCommand>),
+    /// RDP backend command channel (run on a dedicated OS thread).
+    Rdp(std::sync::mpsc::Sender<BackendCommand>),
     /// A restored session that is waiting for its backend to be started.
     Pending,
 }
@@ -862,6 +883,9 @@ impl BackendTx {
                 let _ = tx.send(command);
             }
             Self::Serial(tx) => {
+                let _ = tx.send(command);
+            }
+            Self::Rdp(tx) => {
                 let _ = tx.send(command);
             }
             Self::Pending => {}
