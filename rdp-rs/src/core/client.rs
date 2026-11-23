@@ -63,8 +63,8 @@ impl<S: Read + Write> RdpClient<S> {
                 // A raw clipboard virtual-channel payload from the server.
                 let mut buf = Vec::new();
                 match message {
-                    tpkt::Payload::Raw(mut s) => s.read_to_end(&mut buf)?,
-                    tpkt::Payload::FastPath(_, mut s) => s.read_to_end(&mut buf)?,
+                    tpkt::Payload::Raw(mut s) => s.read_to_end(&mut buf)?;
+                    tpkt::Payload::FastPath(_, mut s) => s.read_to_end(&mut buf)?;
                 }
                 callback(RdpEvent::Cliprdr(buf));
                 Ok(())
