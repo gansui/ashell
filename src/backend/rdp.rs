@@ -12,7 +12,7 @@ use std::{
     thread,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use rdp::core::client::Connector;
 use rdp::core::event::RdpEvent;
 
@@ -89,7 +89,9 @@ fn run_rdp(
         .name("ashell".to_string())
         .check_certificate(false);
 
-    let mut client = connector.connect(tcp)?;
+    let mut client = connector
+        .connect(tcp)
+        .map_err(|e| anyhow!("rdp connect failed: {e:?}"))?;
 
     let _ = events.send(BackendEvent::RdpStatus {
         tab_id: tab_id.clone(),
@@ -123,7 +125,7 @@ fn run_rdp(
                 if is_disconnect_error(&e) {
                     exit_reason = "rdp server closed the connection".to_string();
                 } else {
-                    exit_reason = format!("rdp error: {e}");
+                    exit_reason = format!("rdp error: {e:?}");
                 }
                 break;
             }
@@ -158,7 +160,7 @@ fn handle_rdp_event(tab_id: &str, event: RdpEvent, events: &GuardedBackendEventS
                     });
                 }
                 Err(e) => {
-                    tracing::warn!("[rdp] failed to decompress bitmap on {tab_id}: {e}");
+                    tracing::warn!("[rdp] failed to decompress bitmap on {tab_id}: {e:?}");
                 }
             }
         }
