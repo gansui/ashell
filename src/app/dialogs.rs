@@ -113,6 +113,7 @@ impl Ashell {
         let proxy_user_input = self.proxy_user_input.clone();
         let proxy_password_input = self.proxy_password_input.clone();
         let baud_rate_input = self.baud_rate_input.clone();
+        let domain_input = self.domain_input.clone();
 
         window.open_dialog(cx, move |dialog: Dialog, _window, _cx| {
             dialog
@@ -148,6 +149,7 @@ impl Ashell {
                     let proxy_user_input = proxy_user_input.clone();
                     let proxy_password_input = proxy_password_input.clone();
                     let baud_rate_input = baud_rate_input.clone();
+                    let domain_input = domain_input.clone();
                     move |content, window, cx| {
                         let auth_method = view.read(cx).ssh_auth_method;
                         let is_password = auth_method == AuthMethod::Password;
@@ -334,6 +336,11 @@ impl Ashell {
                                                                 .mask_toggle()
                                                                 .tab_index(5),
                                                         ),
+                                                )
+                                            })
+                                            .when(is_rdp, |this| {
+                                                this.child(
+                                                    Input::new(&domain_input).w_full().tab_index(6),
                                                 )
                                             })
                                             .when(is_key, |this| {

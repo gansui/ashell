@@ -428,6 +428,9 @@ async fn run_ssh(
                     Some(BackendCommand::RdpInput(_)) => {
                         // SSH backend does not handle RDP input; ignore.
                     }
+                    Some(BackendCommand::RdpSetClipboard(_)) => {
+                        // SSH backend does not handle RDP clipboard; ignore.
+                    }
                     Some(BackendCommand::Close) | None => {
                         tracing::info!("[ssh] local client closed the session for tab {}", tab_id);
                         let _ = channel.eof().await;

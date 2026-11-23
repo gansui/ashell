@@ -458,6 +458,7 @@ impl Ashell {
                     tab.send_backend(BackendCommand::Close);
                 }
                 self.tabs.retain(|tab| tab.id != tab_id);
+                self.rdp_frames.remove(&tab_id);
                 restored_tab_ids.remove(&tab_id);
             }
             if pane_root.first_tab_id().is_none_or(str::is_empty) {
@@ -770,11 +771,17 @@ impl Ashell {
                 .trim()
                 .parse::<u16>()
                 .unwrap_or(3389);
-            let user = self.user_input.read(cx).value().trim().to_string();
+            let mut user = self.user_input.read(cx).value().trim().to_string();
             let password = self.password_input.read(cx).value().to_string();
-            // Windows domain; currently left empty. A dedicated domain field can
-            // be added to the form later.
-            let domain = String::new();
+            // Windows domain (optional). If none is set, accept the
+            // `DOMAIN\user` form typed into the user field.
+            let mut domain = self.domain_input.read(cx).value().trim().to_string();
+            if domain.is_empty()
+                && let Some((d, u)) = user.split_once('\\')
+            {
+                domain = d.to_string();
+                user = u.to_string();
+            }
 
             if host.is_empty() {
                 self.status = "RDP host is required".into();
@@ -925,6 +932,7 @@ impl Ashell {
         Self::set_input_value(&self.port_input, "22", window, cx);
         Self::set_input_value(&self.user_input, "root", window, cx);
         Self::set_input_value(&self.password_input, "", window, cx);
+        Self::set_input_value(&self.domain_input, "", window, cx);
         Self::set_input_value(&self.key_path_input, "", window, cx);
         Self::set_input_value(&self.key_inline_input, "", window, cx);
         Self::set_input_value(&self.passphrase_input, "", window, cx);
@@ -952,6 +960,7 @@ impl Ashell {
         Self::set_input_value(&self.port_input, session.port.to_string(), window, cx);
         Self::set_input_value(&self.user_input, session.user.clone(), window, cx);
         Self::set_input_value(&self.password_input, session.password.clone(), window, cx);
+        Self::set_input_value(&self.domain_input, session.domain.clone(), window, cx);
         Self::set_input_value(
             &self.key_path_input,
             session.private_key_path.clone(),
@@ -1162,6 +1171,11 @@ impl Ashell {
     }
 
     pub(crate) fn set_session_protocol(&mut self, protocol: String, cx: &mut Context<Self>) {
+        // RDP always authenticates with a password; reset any SSH auth choice
+        // so the connection form shows the user/password fields.
+        if protocol == "rdp" {
+            self.ssh_auth_method = AuthMethod::Password;
+        }
         self.session_protocol = protocol;
         cx.notify();
     }
@@ -1580,8 +1594,6 @@ impl Ashell {
             crate::terminal::GuardedBackendEventSender::new(self.events_tx.clone());
         // RDP is a pixel-graphics protocol; use a default desktop resolution. This
         // may later be made configurable per session.
-        const RDP_DEFAULT_WIDTH: u16 = 1280;
-        const RDP_DEFAULT_HEIGHT: u16 = 720;
         let backend = crate::backend::rdp::spawn_rdp(
             id.clone(),
             session.host.clone(),
@@ -1589,8 +1601,8 @@ impl Ashell {
             session.domain.clone(),
             session.user.clone(),
             session.password.clone(),
-            RDP_DEFAULT_WIDTH,
-            RDP_DEFAULT_HEIGHT,
+            crate::backend::rdp::DEFAULT_WIDTH,
+            crate::backend::rdp::DEFAULT_HEIGHT,
             backend_events.clone(),
         );
         self.tabs.push(TerminalTab::new_rdp(
@@ -1883,8 +1895,8 @@ impl Ashell {
                         session.domain.clone(),
                         session.user.clone(),
                         session.password.clone(),
-                        cols,
-                        rows,
+                        crate::backend::rdp::DEFAULT_WIDTH,
+                        crate::backend::rdp::DEFAULT_HEIGHT,
                         backend_events.clone(),
                     );
                     self.tabs[ix].set_backend(backend);
@@ -2018,6 +2030,8 @@ impl Ashell {
     }
 
     pub(crate) fn handle_tab_close(&mut self, id: String) {
+        // Release any decoded RDP frame buffer kept for this tab.
+        self.rdp_frames.remove(&id);
         let previous_active_tab = self.active_tab.clone();
         if self
             .connection_progress
@@ -2412,8 +2426,8 @@ impl Ashell {
                     session.domain.clone(),
                     session.user.clone(),
                     session.password.clone(),
-                    DEFAULT_COLS,
-                    DEFAULT_ROWS,
+                    crate::backend::rdp::DEFAULT_WIDTH,
+                    crate::backend::rdp::DEFAULT_HEIGHT,
                     backend_events.clone(),
                 );
                 TerminalTab::new_rdp(new_id.clone(), &session, backend, backend_events)

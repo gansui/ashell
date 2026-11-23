@@ -1,7 +1,7 @@
 use core::x224;
 use core::tpkt;
 use model::error::{RdpResult, Error, RdpError, RdpErrorKind};
-use core::gcc::{KeyboardLayout, client_core_data, ClientData, ServerData, client_security_data, client_network_data, block_header, write_conference_create_request, MessageType, read_conference_create_response, Version};
+use core::gcc::{KeyboardLayout, client_core_data, ClientData, ServerData, client_security_data, client_network_data, channel_def, block_header, write_conference_create_request, MessageType, read_conference_create_response, Version};
 use model::data::{Trame, to_vec, Message, DataType, U16};
 use nla::asn1::{Sequence, ImplicitTag, OctetString, Enumerate, ASN1Type, Integer, to_der, from_ber};
 use yasna::{Tag};
@@ -190,7 +190,9 @@ impl<S: Read + Write> Client<S> {
             name: client_name
         }));
         let client_security_data = client_security_data();
-        let client_network_data = client_network_data(trame![]);
+        let client_network_data = client_network_data(trame![
+            channel_def(&"cliprdr".to_string(), 0xC0000000)
+        ]);
         let user_data = to_vec(&trame![
             trame![block_header(Some(MessageType::CsCore), Some(client_core_data.length() as u16)), client_core_data],
             trame![block_header(Some(MessageType::CsSecurity), Some(client_security_data.length() as u16)), client_security_data],
@@ -235,11 +237,26 @@ impl<S: Read + Write> Client<S> {
         self.channel_ids.insert("global".to_string(), 1003);
         self.channel_ids.insert("user".to_string(), self.user_id.unwrap());
 
+        // Register the first static virtual channel (cliprdr) id assigned by
+        // the server. The server returns virtual-channel ids in the same order
+        // the client declared them in the network data.
+        if let Some(server_data) = &self.server_data {
+            if let Some(&cliprdr_id) = server_data.channel_ids.first() {
+                self.channel_ids.insert("cliprdr".to_string(), cliprdr_id);
+            }
+        }
+
         // Create list of requested channels
-        // Actually only the two static main channel are requested
-        for channel_id in self.channel_ids.values() {
-            self.x224.write(channel_join_request(self.user_id, Some(*channel_id))?)?;
-            if !read_channel_join_confirm(self.user_id.unwrap(), *channel_id, &mut try_let!(tpkt::Payload::Raw, self.x224.read()?)?)? {
+        // MCS requires joining global (1003) first, then the user channel,
+        // then any static virtual channels. HashMap order is arbitrary, so
+        // build the join list explicitly.
+        let mut join_ids = vec![1003u16, self.user_id.unwrap()];
+        if let Some(cliprdr_id) = self.channel_ids.get("cliprdr") {
+            join_ids.push(*cliprdr_id);
+        }
+        for channel_id in join_ids {
+            self.x224.write(channel_join_request(self.user_id, Some(channel_id))?)?;
+            if !read_channel_join_confirm(self.user_id.unwrap(), channel_id, &mut try_let!(tpkt::Payload::Raw, self.x224.read()?)?)? {
                 println!("Server reject channel id {:?}", channel_id);
             }
         }
@@ -259,10 +276,16 @@ impl<S: Read + Write> Client<S> {
     /// ```
     pub fn write<T: 'static>(&mut self, channel_name: &String, message: T) -> RdpResult<()>
     where T: Message {
+        let channel_id = *self.channel_ids.get(channel_name).ok_or_else(|| {
+            Error::RdpError(RdpError::new(
+                RdpErrorKind::Unknown,
+                &format!("MCS: unknown channel {:?}", channel_name),
+            ))
+        })?;
         self.x224.write(trame![
             mcs_pdu_header(Some(DomainMCSPDU::SendDataRequest), None),
             U16::BE(self.user_id.unwrap() - 1001),
-            U16::BE(self.channel_ids[channel_name]),
+            U16::BE(channel_id),
             0x70 as u8,
             per::write_length(message.length() as u16)?,
             message

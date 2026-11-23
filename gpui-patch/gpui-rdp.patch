@@ -1,0 +1,129 @@
+--- a/crates/gpui/src/platform.rs
++++ b/crates/gpui/src/platform.rs
+@@ -1909,11 +1909,21 @@
+     ) -> Result<AtlasTile>;
+ 
+     fn remove(&mut self, tile: AtlasTile);
++
++    /// 原地更新一张已存在的 tile。默认不做任何事; Windows/Linux 后端覆写为真正上传。
++    fn update_tile(&mut self, _tile: &AtlasTile, _bytes: &[u8]) {}
+ }
+ 
+ #[doc(hidden)]
++fn fxhash_bytes(bytes: &[u8]) -> u64 {
++    let mut hasher = collections::FxHasher::default();
++    hasher.write(bytes);
++    hasher.finish()
++}
++
+ pub struct AtlasState<Backend> {
+     tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
++    image_hashes: FxHashMap<AtlasKey, u64>,
+     pub backend: Backend,
+ }
+ 
+@@ -1921,6 +1931,7 @@
+     pub fn new(backend: Backend) -> Self {
+         Self {
+             tiles_by_key: FxHashMap::default(),
++            image_hashes: FxHashMap::default(),
+             backend,
+         }
+     }
+@@ -1931,6 +1942,7 @@
+ 
+     pub fn clear(&mut self, reset_backend: impl FnOnce(&mut Backend)) {
+         self.tiles_by_key.clear();
++        self.image_hashes.clear();
+         reset_backend(&mut self.backend);
+     }
+ }
+@@ -1948,7 +1960,20 @@
+         build: &mut dyn FnMut() -> Result<Option<(Size<DevicePixels>, Cow<'a, [u8]>)>>,
+     ) -> Result<Option<AtlasTile>> {
+         match self.tiles_by_key.entry(key) {
+-            Entry::Occupied(entry) => Ok(Some(*entry.get())),
++            Entry::Occupied(entry) => {
++                // RDP: 每个逻辑帧复用同一个 ImageId, key 始终命中。这里重新 build 拿到
++                // 新像素, 若与上次哈希不同则原地 update, 避免每帧申请新 tile 导致图集泄漏。
++                if let AtlasKey::Image(_) = entry.key() {
++                    if let Some((_, bytes)) = build()? {
++                        let hash = fxhash_bytes(&bytes);
++                        if self.image_hashes.get(entry.key()) != Some(&hash) {
++                            self.backend.update_tile(entry.get(), &bytes);
++                            self.image_hashes.insert(entry.key().clone(), hash);
++                        }
++                    }
++                }
++                Ok(Some(*entry.get()))
++            }
+             Entry::Vacant(entry) => {
+                 profiling::scope!("new tile");
+                 let Some((size, bytes)) = build()? else {
+@@ -1957,6 +1982,7 @@
+                 let tile = self
+                     .backend
+                     .insert(entry.key().texture_kind(), size, &bytes)?;
++                self.image_hashes.insert(entry.key().clone(), fxhash_bytes(&bytes));
+                 entry.insert(tile);
+                 Ok(Some(tile))
+             }
+@@ -1964,6 +1990,7 @@
+     }
+ 
+     pub fn remove(&mut self, key: &AtlasKey) {
++        self.image_hashes.remove(key);
+         if let Some(tile) = self.tiles_by_key.remove(key) {
+             self.backend.remove(tile);
+         }
+
+--- a/crates/gpui/src/assets.rs
++++ b/crates/gpui/src/assets.rs
+@@ -68,6 +68,15 @@
+         }
+     }
+ 
++    /// 以指定的 id 构造图片, 便于复用同一图集 tile(如 RDP 每帧更新像素)。
++    pub fn with_id(id: ImageId, data: impl Into<SmallVec<[Frame; 1]>>) -> Self {
++        Self {
++            id,
++            scale_factor: 1.0,
++            data: data.into(),
++        }
++    }
++
+     /// Convert this image into a byte slice.
+     pub fn as_bytes(&self, frame_index: usize) -> Option<&[u8]> {
+         self.data
+
+--- a/crates/gpui_windows/src/directx_atlas.rs
++++ b/crates/gpui_windows/src/directx_atlas.rs
+@@ -128,7 +128,12 @@
+             }
+         }
+     }
+-}
++
++    fn update_tile(&mut self, tile: &AtlasTile, bytes: &[u8]) {
++        if let Some(texture) = self.texture(tile.texture_id) {
++            texture.upload(&self.device_context, tile.bounds, bytes);
++        }
++    }}
+ 
+ impl DirectXAtlasTextures {
+     fn allocate(
+
+--- a/crates/gpui_wgpu/src/wgpu_atlas.rs
++++ b/crates/gpui_wgpu/src/wgpu_atlas.rs
+@@ -156,6 +156,10 @@
+             }
+         }
+     }
++
++    fn update_tile(&mut self, tile: &AtlasTile, bytes: &[u8]) {
++        self.upload_texture(tile.texture_id, tile.bounds, bytes);
++    }
+ }
+ 
+ impl WgpuAtlasTextures {
+

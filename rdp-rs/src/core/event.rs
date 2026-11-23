@@ -141,5 +141,7 @@ pub enum RdpEvent {
     /// Mouse event
     Pointer(PointerEvent),
     /// Keyboard event
-    Key(KeyboardEvent)
+    Key(KeyboardEvent),
+    /// Raw clipboard virtual-channel (cliprdr) payload received from the server.
+    Cliprdr(Vec<u8>)
 }

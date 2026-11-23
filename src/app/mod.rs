@@ -16,14 +16,14 @@ use std::{
     collections::{HashMap, HashSet},
     ops::Range,
     rc::Rc,
-    sync::mpsc,
+    sync::{Arc, mpsc},
     time::{Duration, Instant},
 };
 
 use crate::app::resizable::ResizableState;
 use gpui::{
-    AppContext as _, Bounds, Context, Entity, FocusHandle, Pixels, Point, SharedString, Size,
-    UniformListScrollHandle, Window, point, px, size,
+    AppContext as _, Bounds, Context, Entity, FocusHandle, Pixels, Point, RenderImage, SharedString,
+    Size, UniformListScrollHandle, Window, point, px, size,
 };
 use gpui_component::{
     Theme, ThemeMode, ThemeRegistry,
@@ -274,6 +274,7 @@ pub(crate) struct Ashell {
     pub(crate) port_input: Entity<InputState>,
     pub(crate) user_input: Entity<InputState>,
     pub(crate) password_input: Entity<InputState>,
+    pub(crate) domain_input: Entity<InputState>,
     pub(crate) key_path_input: Entity<InputState>,
     pub(crate) key_inline_input: Entity<InputState>,
     pub(crate) passphrase_input: Entity<InputState>,
@@ -454,10 +455,17 @@ pub(crate) struct RdpFrameState {
     pub(crate) rgba: Vec<u8>,
     /// Whether at least one bitmap region has been received.
     pub(crate) has_frame: bool,
+    /// GPU-ready image rebuilt from `rgba` after the latest bitmap update.
+    pub(crate) image: Option<Arc<RenderImage>>,
 }
 
 impl RdpFrameState {
     /// Apply one decoded bitmap region onto the frame buffer.
+    ///
+    /// rdp-rs decodes bitmaps to BGRA (32bpp passthrough and the 16bpp
+    /// conversion both store blue, green, red, alpha in memory). This converts
+    /// each pixel to RGBA and forces alpha opaque, because RDP often sends a
+    /// zero alpha byte that would otherwise render fully transparent.
     pub(crate) fn apply_bitmap(
         &mut self,
         x: u16,
@@ -483,13 +491,38 @@ impl RdpFrameState {
             for col in 0..region_w {
                 let di = dst_offset + col * 4;
                 let si = src_offset + col * 4;
-                if di + 4 > self.rgba.len() {
+                if di + 4 > self.rgba.len() || si + 4 > rgba.len() {
                     break;
                 }
-                self.rgba[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+                self.rgba[di] = rgba[si];
+                self.rgba[di + 1] = rgba[si + 1];
+                self.rgba[di + 2] = rgba[si + 2];
+                self.rgba[di + 3] = 0xff;
             }
         }
         self.has_frame = true;
+    }
+
+    /// Rebuild the GPU image element from the current frame buffer.
+    ///
+    /// Reuses the same image id across updates (via `RenderImage::with_id`) so
+    /// GPUI's sprite atlas updates the existing tile in place instead of
+    /// allocating a new texture region for every frame, which would leak GPU
+    /// memory for a live remote desktop.
+    pub(crate) fn rebuild_image(&mut self) {
+        if self.width == 0 || self.height == 0 {
+            return;
+        }
+        let Some(buffer) =
+            image::RgbaImage::from_raw(self.width as u32, self.height as u32, self.rgba.clone())
+        else {
+            return;
+        };
+        let frame = image::Frame::new(buffer);
+        self.image = Some(match &self.image {
+            Some(existing) => Arc::new(RenderImage::with_id(existing.id, vec![frame])),
+            None => Arc::new(RenderImage::new(vec![frame])),
+        });
     }
 }
 
@@ -590,6 +623,9 @@ impl Ashell {
             InputState::new(window, cx)
                 .placeholder(t!("password"))
                 .masked(true)
+        });
+        let domain_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("domain (optional, e.g. WORKGROUP)")
         });
         let key_path_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("~/.ssh/id_ed25519"));
@@ -732,6 +768,7 @@ impl Ashell {
             cx.subscribe_in(&port_input, window, Self::on_input_event),
             cx.subscribe_in(&user_input, window, Self::on_input_event),
             cx.subscribe_in(&password_input, window, Self::on_input_event),
+            cx.subscribe_in(&domain_input, window, Self::on_input_event),
             cx.subscribe_in(&key_path_input, window, Self::on_input_event),
             cx.subscribe_in(&key_inline_input, window, Self::on_input_event),
             cx.subscribe_in(&passphrase_input, window, Self::on_input_event),
@@ -839,6 +876,7 @@ impl Ashell {
             port_input,
             user_input,
             password_input,
+            domain_input,
             key_path_input,
             key_inline_input,
             passphrase_input,
@@ -1749,6 +1787,7 @@ impl Ashell {
                         frame.rgba = vec![0; width as usize * height as usize * 4];
                     }
                     frame.apply_bitmap(x, y, width, height, &rgba);
+                    frame.rebuild_image();
                 }
                 BackendEvent::RdpStatus { tab_id, text } => {
                     if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -2080,8 +2119,8 @@ impl Ashell {
                     session.domain.clone(),
                     session.user.clone(),
                     session.password.clone(),
-                    self.tabs[ix].cols,
-                    self.tabs[ix].rows,
+                    crate::backend::rdp::DEFAULT_WIDTH,
+                    crate::backend::rdp::DEFAULT_HEIGHT,
                     backend_events.clone(),
                 ),
                 _ => continue,

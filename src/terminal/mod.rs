@@ -702,6 +702,9 @@ pub enum BackendCommand {
     Resize { cols: u16, rows: u16 },
     /// RDP remote-desktop input (pointer/keyboard) to forward to the server.
     RdpInput(RdpInputEvent),
+    /// Update the host clipboard text cached by an RDP backend so it can answer
+    /// clipboard format-data requests from the remote side.
+    RdpSetClipboard(String),
     SampleMetrics,
     SampleProcesses,
     SamplePorts,

@@ -7,10 +7,11 @@ use std::{
 use crate::app::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui::{
     Anchor, Animation, AnimationExt as _, AppContext as _, Context, DismissEvent, ElementId, Empty,
-    Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, KeyDownEvent, KeyUpEvent, ParentElement as _, PathBuilder, Pixels, Render,
-    StatefulInteractiveElement as _, Styled as _, Window, bounce, canvas, div, ease_in_out, hsla,
-    point, prelude::FluentBuilder as _, px, relative, uniform_list,
+    Focusable as _, FontWeight, Hsla, ImageSource, InteractiveElement as _, IntoElement,
+    KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, PathBuilder, Pixels, Render, StatefulInteractiveElement as _, Styled as _,
+    Window, bounce, canvas, div, ease_in_out, hsla, img, point, prelude::FluentBuilder as _, px,
+    relative, uniform_list,
 };
 use gpui_component::{
     ActiveTheme, Disableable as _, ElementExt, Icon, IconName, InteractiveElementExt as _, Root,
@@ -524,18 +525,46 @@ impl Ashell {
     }
 
     /// Send a mouse pointer event to the RDP backend of the given tab.
-    fn send_rdp_pointer(
+    ///
+    /// `position` is in window coordinates; `pane` is the rendered bitmap's
+    /// bounds, used to translate into remote pixels (the remote frame may be a
+    /// different size than the pane, so it is scaled accordingly).
+    fn send_rdp_pointer_at(
         &mut self,
         tab_id: &str,
         position: gpui::Point<gpui::Pixels>,
+        pane: Option<gpui::Bounds<gpui::Pixels>>,
+        remote_width: u16,
+        remote_height: u16,
         button: crate::terminal::RdpPointerButton,
         down: bool,
     ) {
+        let (rel_x, rel_y, pane_w, pane_h) = match pane {
+            Some(bounds) => (
+                (position.x - bounds.origin.x).as_f32(),
+                (position.y - bounds.origin.y).as_f32(),
+                bounds.size.width.as_f32(),
+                bounds.size.height.as_f32(),
+            ),
+            None => (position.x.as_f32(), position.y.as_f32(), 0.0, 0.0),
+        };
+        let sx = if pane_w > 0.0 {
+            remote_width as f32 / pane_w
+        } else {
+            1.0
+        };
+        let sy = if pane_h > 0.0 {
+            remote_height as f32 / pane_h
+        } else {
+            1.0
+        };
+        let x = (rel_x * sx).clamp(0.0, remote_width.saturating_sub(1) as f32) as u16;
+        let y = (rel_y * sy).clamp(0.0, remote_height.saturating_sub(1) as f32) as u16;
         if let Some(tab) = self.tabs.iter().find(|t| &t.id == tab_id) {
             tab.send_backend(crate::terminal::BackendCommand::RdpInput(
                 crate::terminal::RdpInputEvent::Pointer(crate::terminal::RdpPointerInput {
-                    x: position.x.as_f32().clamp(0.0, u16::MAX as f32) as u16,
-                    y: position.y.as_f32().clamp(0.0, u16::MAX as f32) as u16,
+                    x,
+                    y,
                     button,
                     down,
                 }),
@@ -551,6 +580,16 @@ impl Ashell {
                     code: scancode,
                     down,
                 }),
+            ));
+        }
+    }
+
+    /// Update the clipboard text the RDP backend will answer format-data
+    /// requests with (host clipboard -> remote).
+    fn send_rdp_clipboard(&mut self, tab_id: &str, text: &str) {
+        if let Some(tab) = self.tabs.iter().find(|t| &t.id == tab_id) {
+            tab.send_backend(crate::terminal::BackendCommand::RdpSetClipboard(
+                text.to_string(),
             ));
         }
     }
@@ -581,6 +620,18 @@ impl Ashell {
             })
             .unwrap_or((String::new(), false, None, false));
 
+        let rdp_image = self.rdp_frames.get(tab_id).and_then(|f| f.image.clone());
+        let (rdp_width, rdp_height) = self
+            .rdp_frames
+            .get(tab_id)
+            .map(|f| (f.width.max(1), f.height.max(1)))
+            .unwrap_or((1280, 720));
+
+        // The pane's laid-out bounds, filled in by a transparent canvas probe so
+        // mouse coordinates can be converted from window space to remote pixels.
+        let pane_bounds: std::rc::Rc<std::cell::Cell<Option<gpui::Bounds<gpui::Pixels>>>> =
+            std::rc::Rc::new(std::cell::Cell::new(None));
+
         let label = if connected {
             "RDP".to_string()
         } else if has_frame {
@@ -591,17 +642,22 @@ impl Ashell {
             status
         };
 
-        let rdp_tab_move = tab_id_owned.clone();
-        let rdp_tab_down = tab_id_owned.clone();
-        let rdp_tab_up = tab_id_owned.clone();
+        let pointer_bounds = pane_bounds.clone();
         let mut el = div()
             .size_full()
+            .relative()
             .bg(cx.theme().tab_bar)
             .overflow_hidden()
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener({
                 let tid = tab_id_owned.clone();
-                move |this, event: &KeyDownEvent, _, _| {
+                move |this, event: &KeyDownEvent, _, cx| {
+                    // Sync the host clipboard so the remote can paste it.
+                    if let Some(clip) = cx.read_from_clipboard()
+                        && let Some(text) = clip.text()
+                    {
+                        this.send_rdp_clipboard(&tid, &text);
+                    }
                     let key_str = event.keystroke.key.to_ascii_lowercase();
                     if let Some(code) = rdp_scancode_for_key(&key_str) {
                         this.send_rdp_key(&tid, code, true);
@@ -617,44 +673,69 @@ impl Ashell {
                     }
                 }
             }))
-            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, _| {
-                this.send_rdp_pointer(
-                    &rdp_tab_move,
-                    event.position,
-                    crate::terminal::RdpPointerButton::None,
-                    false,
-                );
+            .on_mouse_move(cx.listener({
+                let tid = tab_id_owned.clone();
+                let pb = pointer_bounds.clone();
+                move |this, event: &MouseMoveEvent, _, _| {
+                    this.send_rdp_pointer_at(
+                        &tid,
+                        event.position,
+                        pb.get(),
+                        rdp_width,
+                        rdp_height,
+                        crate::terminal::RdpPointerButton::None,
+                        false,
+                    );
+                }
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, _| {
-                    this.send_rdp_pointer(
-                        &rdp_tab_down,
-                        event.position,
-                        crate::terminal::RdpPointerButton::Left,
-                        true,
-                    );
+                cx.listener({
+                    let tid = tab_id_owned.clone();
+                    let pb = pointer_bounds.clone();
+                    move |this, event: &MouseDownEvent, _, _| {
+                        this.send_rdp_pointer_at(
+                            &tid,
+                            event.position,
+                            pb.get(),
+                            rdp_width,
+                            rdp_height,
+                            crate::terminal::RdpPointerButton::Left,
+                            true,
+                        );
+                    }
                 }),
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseUpEvent, _, _| {
-                    this.send_rdp_pointer(
-                        &rdp_tab_up,
-                        event.position,
-                        crate::terminal::RdpPointerButton::Left,
-                        false,
-                    );
+                cx.listener({
+                    let tid = tab_id_owned.clone();
+                    let pb = pointer_bounds.clone();
+                    move |this, event: &MouseUpEvent, _, _| {
+                        this.send_rdp_pointer_at(
+                            &tid,
+                            event.position,
+                            pb.get(),
+                            rdp_width,
+                            rdp_height,
+                            crate::terminal::RdpPointerButton::Left,
+                            false,
+                        );
+                    }
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener({
                     let tid = tab_id_owned.clone();
+                    let pb = pointer_bounds.clone();
                     move |this, event: &MouseDownEvent, _, _| {
-                        this.send_rdp_pointer(
+                        this.send_rdp_pointer_at(
                             &tid,
                             event.position,
+                            pb.get(),
+                            rdp_width,
+                            rdp_height,
                             crate::terminal::RdpPointerButton::Right,
                             true,
                         );
@@ -665,10 +746,14 @@ impl Ashell {
                 MouseButton::Right,
                 cx.listener({
                     let tid = tab_id_owned.clone();
+                    let pb = pointer_bounds.clone();
                     move |this, event: &MouseUpEvent, _, _| {
-                        this.send_rdp_pointer(
+                        this.send_rdp_pointer_at(
                             &tid,
                             event.position,
+                            pb.get(),
+                            rdp_width,
+                            rdp_height,
                             crate::terminal::RdpPointerButton::Right,
                             false,
                         );
@@ -679,10 +764,14 @@ impl Ashell {
                 MouseButton::Middle,
                 cx.listener({
                     let tid = tab_id_owned.clone();
+                    let pb = pointer_bounds.clone();
                     move |this, event: &MouseDownEvent, _, _| {
-                        this.send_rdp_pointer(
+                        this.send_rdp_pointer_at(
                             &tid,
                             event.position,
+                            pb.get(),
+                            rdp_width,
+                            rdp_height,
                             crate::terminal::RdpPointerButton::Middle,
                             true,
                         );
@@ -693,18 +782,39 @@ impl Ashell {
                 MouseButton::Middle,
                 cx.listener({
                     let tid = tab_id_owned.clone();
+                    let pb = pointer_bounds.clone();
                     move |this, event: &MouseUpEvent, _, _| {
-                        this.send_rdp_pointer(
+                        this.send_rdp_pointer_at(
                             &tid,
                             event.position,
+                            pb.get(),
+                            rdp_width,
+                            rdp_height,
                             crate::terminal::RdpPointerButton::Middle,
                             false,
                         );
                     }
                 }),
             )
-            .child(
-                v_flex()
+            .child({
+                // A non-interactive probe: Canvas has no hitbox, so it never
+                // steals pointer events, and its bounds let the mouse handlers
+                // map window coordinates onto the remote desktop resolution.
+                let pb = pane_bounds.clone();
+                canvas(
+                    move |bounds, _window, _cx| {
+                        pb.set(Some(bounds));
+                    },
+                    |_bounds, _prepaint, _window, _cx| {},
+                )
+                .absolute()
+                .size_full()
+            })
+            .child(match rdp_image {
+                Some(image) => img(ImageSource::Render(image))
+                    .size_full()
+                    .into_any_element(),
+                None => v_flex()
                     .size_full()
                     .items_center()
                     .gap_2()
@@ -715,8 +825,9 @@ impl Ashell {
                             .child(label),
                     )
                     .when(is_focused, |d| d.opacity(1.0))
-                    .when(!is_focused, |d| d.opacity(0.7)),
-            );
+                    .when(!is_focused, |d| d.opacity(0.7))
+                    .into_any_element(),
+            });
 
         if let Some(reason) = disconnected {
             el = el.child(

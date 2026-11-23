@@ -244,4 +244,82 @@ rdp-rs **没有实现剪贴板虚拟通道**，需要自己补：
 - 真实位图渲染（GPUI `canvas` 绘制 `rdp_frames` RGBA）
 - RDP 域名输入框
 - CLIPRDR 剪贴板通道
+
+## 十五、阶段 8（CLIPRDR 剪贴板虚拟通道）实际改动（已完成，待编译验证）
+
+1. **`rdp-rs/src/core/gcc.rs`**：`client_network_data` 声明虚拟通道（已有 `channel_def` 支持）
+
+2. **`rdp-rs/src/core/mcs.rs`**：
+   - `write_connect_initial` 声明 `cliprdr` 通道（`channel_def("cliprdr", 0xC0000000)`）
+   - `connect` 从服务器返回的 `server_data.channel_ids[0]` 解析 cliprdr 的通道 id 并注册
+
+3. **`rdp-rs/src/core/event.rs`**：`RdpEvent` 新增 `Cliprdr(Vec<u8>)` 变体
+
+4. **`rdp-rs/src/core/client.rs`**：
+   - `read` 处理 `"cliprdr"` 通道 → 回调 `RdpEvent::Cliprdr`
+   - 新增 `write_clipboard(data)` 方法：向 cliprdr 通道发送原始数据
+
+5. **`src/terminal/mod.rs`**：`BackendCommand` 新增 `RdpSetClipboard(String)` 变体（UI 层把宿主机剪贴板文本传给后端）
+
+6. **`src/backend/local.rs`/`serial.rs`/`ssh.rs`**：`match BackendCommand` 加 `RdpSetClipboard` 忽略分支
+
+7. **`src/backend/rdp.rs`**：
+   - 新增 CLIPRDR 编码函数：`cliprdr_header`/`cliprdr_caps`/`cliprdr_is_format_data_request`/`cliprdr_format_data_response`
+   - `run_rdp`：连接后发 CAPS；缓存 `clipboard_text`；处理 `RdpSetClipboard` 命令；用 `Arc<Mutex<Vec<Vec<u8>>>>` 待发送队列规避 `client.read` 闭包借用；`read` 后 drain 队列用 `client.write_clipboard` 发送
+   - `handle_rdp_event`：处理 `RdpEvent::Cliprdr`（收到 `CB_FORMAT_DATA_REQUEST` 时，用缓存的剪贴板文本构建 `CB_FORMAT_DATA_RESPONSE` 入队）
+
+8. **`src/app/ui.rs`**：
+   - 新增 `send_rdp_clipboard` 方法
+   - `render_rdp_pane` 的 `on_key_down` 闭包读取宿主机剪贴板（`cx.read_from_clipboard()`），把文本传给后端（按键时同步宿主剪贴板 → 远端）
+
+**说明**：CLIPRDR 是响应式——远端（服务器）发 `CB_FORMAT_DATA_REQUEST` 请求宿主机剪贴板数据时，后端用缓存的剪贴板文本回 `CB_FORMAT_DATA_RESPONSE`（UTF-16LE）。宿主机剪贴板文本在按键时从 GPUI 剪贴板读取并缓存到后端。真实位图渲染仍为占位，需 GPUI 纹理/图像 API。
+
+**已完成**：RDP 连接 / tab 创建 / 会话保存恢复 / 渲染面板(占位) / 新建连接 UI / 鼠标键盘输入转发 / CLIPRDR 剪贴板通道。
+
+**剩余工作**：
+- 真实位图渲染（GPUI 纹理/图像 API，需编译验证签名）
+- RDP 域名输入框
    - `render_rdp_pane` 给 el 加 `on_mouse_move`/`on_mouse_down`/`on_mouse_up`，转发鼠标事件到 RDP 后端
+
+## 十六、阶段 9（真实位图渲染 + gpui 补丁）实际改动（已完成，待 fork 补丁后编译验证）
+
+1. **像素格式结论（已用 zed 源码验证）**：
+   - GPUI sprite atlas 的 Image tile 纹理格式：Windows `DXGI_FORMAT_B8G8R8A8_UNORM`（directx_atlas.rs）、Linux `Bgra8Unorm`（wgpu_atlas.rs，且其 `swizzle_upload_data` 测试名即 `converts_bgra_to_rgba`）→ **RenderImage 像素规范是 BGRA**
+   - rdp-rs 的 32bpp 透传与 16bpp 转换（`rgb565torgb32`）输出都是 BGRA
+   - ⇒ `RdpFrameState::apply_bitmap`（src/app/mod.rs）**保持 BGRA 原序**，仅把 alpha 强制 0xff（RDP 32bpp 的 alpha 常为 0，否则全透明）
+2. **真实位图渲染**：
+   - `RdpFrameState` 增加 `image: Option<Arc<RenderImage>>`；`rebuild_image()` 每帧从整屏缓冲区重建
+   - `drain_backend_events` 的 RdpBitmap 分支：`apply_bitmap` 后 `rebuild_image()`
+   - `render_rdp_pane`（src/app/ui.rs）：有帧时 `img(ImageSource::Render(image)).size_full()`（默认 Contain），无帧显示占位文本
+   - import：`gpui::{ImageSource, img}`；`Cargo.toml` 的 `image = 0.25` 已存在（与 gpui 同版本 0.25.10，lock 中唯一）
+3. **图集泄漏问题（关键）**：
+   - 原生 GPUI：`RenderImage::new` 每帧新 `ImageId` → atlas `get_or_insert_with` 按 `(id, frame)` 分配 tile **只增不减**（`remove` 无人调用）→ 每帧泄漏 ~3.7MB 显存
+   - 解决：`gpui-patch/gpui-rdp.patch`（3 文件）：
+     - `assets.rs`：新增 `RenderImage::with_id(id, data)`（复用 id）
+     - `directx_atlas.rs` / `wgpu_atlas.rs`：命中 `AtlasKey::Image` tile 时重建像素，FNV-1a 哈希比较，**变化才在原 tile 原地重传**；哈希表随 remove/clear/device_lost 清理
+   - ashell 侧 `rebuild_image` 用 `with_id(existing.id, ...)` 复用 id
+   - **前置条件**：爸爸需按 `gpui-patch/README.md` fork zed 仓库（锁定提交 969a67fc）、`git apply gpui-patch/gpui-rdp.patch`、push，并把新提交哈希交给我，我再把 `Cargo.toml` 的 gpui/gpui_platform/menu 三个 git 依赖指向 fork
+4. **鼠标坐标换算**：
+   - `render_rdp_pane` 放一个 `canvas` 探针（`absolute().size_full()`，Canvas 无 hitbox 不拦截鼠标）每帧记录面板 bounds 到 `Rc<Cell<Option<Bounds<Pixels>>>>`
+   - `send_rdp_pointer` 改名为 `send_rdp_pointer_at`：窗口坐标 − bounds.origin → 按远端分辨率（`RdpFrameState.width/height`，默认 1280×720）缩放 → clamp
+5. **RDP 域名输入框**：
+   - `Ashell.domain_input: Entity<InputState>`（声明/初始化/订阅/构造，4 处）
+   - `connect_ssh` RDP 分支读取 domain；支持 `DOMAIN\user` 形式从 user 字段拆分
+   - 对话框 `is_rdp` 时显示 domain 输入框；`set_session_protocol("rdp")` 强制 `AuthMethod::Password`（避免显示 SSH key/config 表单）
+   - `load_session_into_form` / 表单清理处同步 domain
+6. **RDP 分辨率统一**：`backend/rdp.rs` 加 `pub const DEFAULT_WIDTH=1280 / DEFAULT_HEIGHT=720`；open_rdp_session、split、两处重连全部使用（原来重连/split 误用终端 cols/rows 当像素宽高）
+7. **内存清理**：`handle_tab_close` 与恢复状态时 `rdp_frames.remove(tab_id)`
+8. **mcs.rs join 顺序修复**：原来 `for id in channel_ids.values()` 是 HashMap 无序；MCS 要求 global(1003)→user→虚拟通道，改为显式 `join_ids` 向量
+9. **mcs.rs write 健壮性**：`channel_ids[channel]` 索引改 `get().ok_or_else(...)`（服务器未分配 cliprdr 时返回错误而非 panic）
+10. **rdp-rs edition 2015 约束**：mcs.rs 的 let 链改为嵌套 if-let（rdp-rs 无 edition 字段=2015，不支持 let 链）；全仓 `cargo fmt --all --check` 语法解析 0 错误
+
+**已完成**：RDP 连接 / tab / 保存恢复 / split / 重连 / 渲染面板（真实位图）/ 新建连接 UI（含域名）/ 鼠标键盘输入（含坐标换算）/ CLIPRDR 剪贴板 / gpui 补丁
+
+**待爸爸操作**：
+- fork zed + 应用 `gpui-patch/gpui-rdp.patch` + push，把新提交哈希给我（之后我改 Cargo.toml）
+- 上传 ashell 仓库走 GitHub Actions 编译
+
+**已知限制**：
+- RDP 线程 `client.read` 阻塞，Close 命令要等下一次网络事件才生效（避免 read_timeout 破坏协议帧重组，暂不处理）
+- CLIPRDR 为响应式：远端请求剪贴板数据时返回宿主最近一次按键时刻缓存的文本
+- 每次屏幕变化整屏重建 RenderImage（clone ~3.7MB），可接受；后续可优化为仅重建 dirty 区域

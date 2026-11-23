@@ -59,8 +59,23 @@ impl<S: Read + Write> RdpClient<S> {
         let (channel_name, message) = self.mcs.read()?;
         match channel_name.as_str() {
             "global" => self.global.read(message, &mut self.mcs, callback),
+            "cliprdr" => {
+                // A raw clipboard virtual-channel payload from the server.
+                let mut buf = Vec::new();
+                match message {
+                    tpkt::Payload::Raw(mut s) => s.read_to_end(&mut buf)?,
+                    tpkt::Payload::FastPath(_, mut s) => s.read_to_end(&mut buf)?,
+                }
+                callback(RdpEvent::Cliprdr(buf));
+                Ok(())
+            }
             _ => Err(Error::RdpError(RdpError::new(RdpErrorKind::UnexpectedType, &format!("Invalid channel name {:?}", channel_name))))
         }
+    }
+
+    /// Send a raw payload to the clipboard virtual channel (cliprdr).
+    pub fn write_clipboard(&mut self, data: Vec<u8>) -> RdpResult<()> {
+        self.mcs.write(&"cliprdr".to_string(), data)
     }
 
     /// Write an event to the server

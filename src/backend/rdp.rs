@@ -8,7 +8,11 @@
 
 use std::{
     net::TcpStream,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        Arc,
+        mpsc::{self, Receiver},
+        Mutex,
+    },
     thread,
 };
 
@@ -19,6 +23,11 @@ use rdp::core::event::{KeyboardEvent, PointerButton, PointerEvent, RdpEvent};
 use crate::terminal::{
     BackendCommand, BackendEvent, BackendTx, GuardedBackendEventSender, RdpInputEvent,
 };
+
+/// Default remote desktop resolution advertised to the RDP server.
+pub const DEFAULT_WIDTH: u16 = 1280;
+/// Default remote desktop resolution advertised to the RDP server.
+pub const DEFAULT_HEIGHT: u16 = 720;
 
 /// Start an RDP session on a dedicated OS thread.
 ///
@@ -105,6 +114,14 @@ fn run_rdp(
 
     let exit_reason;
     let mut is_shutdown = false;
+    // Host clipboard text cached here so the backend can answer the server's
+    // clipboard format-data requests without blocking on the GPUI main thread.
+    let mut clipboard_text: Option<String> = None;
+    let send_queue: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // Advertise clipboard capabilities (CLIPRDR) once connected.
+    let _ = client.write_clipboard(cliprdr_caps());
+    let _ = client.write_clipboard(cliprdr_monitor_ready());
 
     loop {
         // Dispatch pending commands without blocking the read loop.
@@ -137,6 +154,9 @@ fn run_rdp(
                         }
                     }
                 }
+                BackendCommand::RdpSetClipboard(text) => {
+                    clipboard_text = Some(text);
+                }
                 _ => {}
             }
         }
@@ -145,7 +165,9 @@ fn run_rdp(
             break;
         }
 
-        match client.read(|event| handle_rdp_event(&tab_id, event, &events)) {
+        match client.read(|event| {
+            handle_rdp_event(&tab_id, event, &events, &send_queue, &clipboard_text)
+        }) {
             Ok(()) => {}
             Err(e) => {
                 if is_disconnect_error(&e) {
@@ -154,6 +176,13 @@ fn run_rdp(
                     exit_reason = format!("rdp error: {e:?}");
                 }
                 break;
+            }
+        }
+
+        // Flush queued CLIPRDR responses back to the server.
+        if let Ok(mut q) = send_queue.lock() {
+            for msg in q.drain(..) {
+                let _ = client.write_clipboard(msg);
             }
         }
     }
@@ -167,7 +196,13 @@ fn run_rdp(
 }
 
 /// Decode a single RDP event into ashell backend events.
-fn handle_rdp_event(tab_id: &str, event: RdpEvent, events: &GuardedBackendEventSender) {
+fn handle_rdp_event(
+    tab_id: &str,
+    event: RdpEvent,
+    events: &GuardedBackendEventSender,
+    send_queue: &Arc<Mutex<Vec<Vec<u8>>>>,
+    clipboard: &Option<String>,
+) {
     match event {
         RdpEvent::Bitmap(bitmap) => {
             let x = bitmap.dest_left;
@@ -190,6 +225,17 @@ fn handle_rdp_event(tab_id: &str, event: RdpEvent, events: &GuardedBackendEventS
                 }
             }
         }
+        RdpEvent::Cliprdr(data) => {
+            // A clipboard virtual-channel payload from the server. If it is a
+            // format-data request, answer with the host clipboard text.
+            if cliprdr_is_format_data_request(&data) {
+                if let Some(text) = clipboard {
+                    if let Ok(mut q) = send_queue.lock() {
+                        q.push(cliprdr_format_data_response(text));
+                    }
+                }
+            }
+        }
         // Pointer / Key events are input from the client to the server; they
         // are sent through `RdpClient::write`, not received here.
         _ => {}
@@ -203,4 +249,60 @@ fn is_disconnect_error(error: &rdp::model::error::Error) -> bool {
         rdp::model::error::Error::RdpError(e)
             if e.kind() == rdp::model::error::RdpErrorKind::Disconnect
     )
+}
+
+// --- CLIPRDR (MS-RDPECLIP) helpers ---
+
+/// Build a CLIPRDR message header (msgType u16, msgFlags u16, dataLen u32).
+fn cliprdr_header(msg_type: u16, flags: u16, data_len: u32) -> Vec<u8> {
+    let mut v = Vec::with_capacity(8 + data_len as usize);
+    v.extend_from_slice(&msg_type.to_le_bytes());
+    v.extend_from_slice(&flags.to_le_bytes());
+    v.extend_from_slice(&data_len.to_le_bytes());
+    v
+}
+
+/// Build a `CB_CLIP_CAPS` (0x0007) advertising the General capability set.
+fn cliprdr_caps() -> Vec<u8> {
+    let mut data = Vec::with_capacity(24);
+    data.extend_from_slice(&1u16.to_le_bytes()); // cCapabilitiesSets
+    data.extend_from_slice(&0u16.to_le_bytes()); // pad
+    // General capability set (12 bytes including type and length).
+    data.extend_from_slice(&0x0001u16.to_le_bytes()); // capabilitySetType = General
+    data.extend_from_slice(&12u16.to_le_bytes()); // lengthCapability
+    data.extend_from_slice(&0x0002u32.to_le_bytes()); // version = CB_CAPS_VERSION_2
+    data.extend_from_slice(&0x00000002u32.to_le_bytes()); // generalFlags = long format names
+    let mut msg = cliprdr_header(0x0007, 0x0001, data.len() as u32); // msgFlags = CB_RESPONSE
+    msg.extend_from_slice(&data);
+    msg
+}
+
+/// Build a `CB_MONITOR_READY` (0x0001) telling the server the client is ready.
+fn cliprdr_monitor_ready() -> Vec<u8> {
+    let mut msg = cliprdr_header(0x0001, 0, 4);
+    msg.extend_from_slice(&0u32.to_le_bytes()); // shareId
+    msg
+}
+
+/// Return true when a received cliprdr payload is a `CB_FORMAT_DATA_REQUEST`
+/// (0x0004), meaning the remote wants the host clipboard data.
+fn cliprdr_is_format_data_request(data: &[u8]) -> bool {
+    data.len() >= 2 && u16::from_le_bytes([data[0], data[1]]) == 0x0004
+}
+
+/// Build a `CB_FORMAT_DATA_RESPONSE` (0x0005) carrying the host clipboard text
+/// encoded as UTF-16LE (CF_UNICODETEXT).
+fn cliprdr_format_data_response(text: &str) -> Vec<u8> {
+    let mut text_data = Vec::with_capacity(text.len() * 2 + 2);
+    for unit in text.encode_utf16() {
+        text_data.extend_from_slice(&unit.to_le_bytes());
+    }
+    text_data.extend_from_slice(&0u16.to_le_bytes()); // null terminator
+    // The response body starts with a u32 length of the format data.
+    let mut data = Vec::with_capacity(4 + text_data.len());
+    data.extend_from_slice(&(text_data.len() as u32).to_le_bytes());
+    data.extend_from_slice(&text_data);
+    let mut msg = cliprdr_header(0x0005, 0x0001, data.len() as u32); // msgFlags = CB_RESPONSE
+    msg.extend_from_slice(&data);
+    msg
 }

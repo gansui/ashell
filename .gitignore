@@ -1,3 +1,7 @@
 dist/
 target/
 .DS_Store
+# 本地克隆的 zed 官方源码（--filter=blob:none 部分克隆），不作为工程源码上传
+zed/
+# 临时文件
+tmp/
