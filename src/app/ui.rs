@@ -598,7 +598,7 @@ impl Ashell {
             .size_full()
             .bg(cx.theme().tab_bar)
             .overflow_hidden()
-            .focusable(self.focus_handle.clone())
+            .focus(self.focus_handle.clone())
             .on_key_down(cx.listener({
                 let tid = tab_id_owned.clone();
                 move |this, event: &KeyDownEvent, _, _| {
