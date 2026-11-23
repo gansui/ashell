@@ -517,6 +517,7 @@ impl Ashell {
         is_focused: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let tab_id_owned = tab_id.to_string();
         let (status, connected, disconnected, has_frame) = self
             .tabs
             .iter()
@@ -541,13 +542,16 @@ impl Ashell {
             status
         };
 
+        let rdp_tab_move = tab_id_owned.clone();
+        let rdp_tab_down = tab_id_owned.clone();
+        let rdp_tab_up = tab_id_owned.clone();
         let mut el = div()
             .size_full()
             .bg(cx.theme().tab_bar)
             .overflow_hidden()
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, _| {
                 this.send_rdp_pointer(
-                    tab_id,
+                    &rdp_tab_move,
                     event.position,
                     crate::terminal::RdpPointerButton::None,
                     false,
@@ -557,7 +561,7 @@ impl Ashell {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _, _| {
                     this.send_rdp_pointer(
-                        tab_id,
+                        &rdp_tab_down,
                         event.position,
                         crate::terminal::RdpPointerButton::Left,
                         true,
@@ -568,7 +572,7 @@ impl Ashell {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseUpEvent, _, _| {
                     this.send_rdp_pointer(
-                        tab_id,
+                        &rdp_tab_up,
                         event.position,
                         crate::terminal::RdpPointerButton::Left,
                         false,
