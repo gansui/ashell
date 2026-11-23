@@ -2073,6 +2073,17 @@ impl Ashell {
                     self.tabs[ix].rows,
                     backend_events.clone(),
                 ),
+                crate::terminal::TabKind::Rdp => crate::backend::rdp::spawn_rdp(
+                    tab_id.clone(),
+                    session.host.clone(),
+                    session.port,
+                    session.domain.clone(),
+                    session.user.clone(),
+                    session.password.clone(),
+                    self.tabs[ix].cols,
+                    self.tabs[ix].rows,
+                    backend_events.clone(),
+                ),
                 _ => continue,
             };
 

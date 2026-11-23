@@ -255,6 +255,10 @@ pub enum SavedTerminalTab {
         id: String,
         session: Session,
     },
+    Rdp {
+        id: String,
+        session: Session,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

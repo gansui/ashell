@@ -486,6 +486,81 @@ impl Ashell {
         })
     }
 
+    /// Render the remote-desktop view for an RDP tab.
+    ///
+    /// The decoded RGBA frame is accumulated in `self.rdp_frames[tab_id]`. A
+    /// dedicated GPUI image element that draws those pixels is wired here; until
+    /// then this shows a dark placeholder plus the live connection status.
+    fn render_rdp_pane(
+        &self,
+        tab_id: &str,
+        is_focused: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let (status, connected, disconnected, has_frame) = self
+            .tabs
+            .iter()
+            .find(|t| &t.id == tab_id)
+            .map(|t| {
+                (
+                    t.status.clone(),
+                    t.connected,
+                    t.disconnected_reason.clone(),
+                    self.rdp_frames.get(tab_id).is_some_and(|f| f.has_frame),
+                )
+            })
+            .unwrap_or((String::new(), false, None, false));
+
+        let label = if connected {
+            "RDP".to_string()
+        } else if has_frame {
+            "RDP".to_string()
+        } else if status.is_empty() {
+            "RDP".to_string()
+        } else {
+            status
+        };
+
+        let mut el = div()
+            .size_full()
+            .bg(cx.theme().tab_bar)
+            .overflow_hidden()
+            .child(
+                v_flex()
+                    .size_full()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_color(cx.theme().text)
+                            .text_size(ui_rems(1.0))
+                            .child(label),
+                    )
+                    .when(is_focused, |d| d.opacity(1.0))
+                    .when(!is_focused, |d| d.opacity(0.7)),
+            );
+
+        if let Some(reason) = disconnected {
+            el = el.child(
+                h_flex()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .px_3()
+                    .py_1()
+                    .bg(cx.theme().danger.opacity(0.15))
+                    .child(
+                        div()
+                            .text_size(ui_rems(0.85))
+                            .text_color(cx.theme().danger)
+                            .child(format!("RDP disconnected: {reason}")),
+                    ),
+            );
+        }
+        el
+    }
+
     fn render_sftp_minimized_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .flex_none()
@@ -5185,6 +5260,17 @@ impl Ashell {
                     return this.render_home_page(cx).into_any_element();
                 }
                 let is_focused = path == this.focused_pane_path.as_slice();
+                // RDP tabs render a remote-desktop view (pixels), not a character terminal.
+                if this
+                    .tabs
+                    .iter()
+                    .find(|t| &t.id == tab_id)
+                    .is_some_and(|t| t.kind == TabKind::Rdp)
+                {
+                    return this
+                        .render_rdp_pane(tab_id, is_focused, cx)
+                        .into_any_element();
+                }
                 let keyword_highlight = this.config.keyword_highlight();
                 let snapshot = this
                     .tabs

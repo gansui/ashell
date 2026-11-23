@@ -35,6 +35,7 @@ pub enum TabKind {
     Local,
     Ssh,
     Serial,
+    Rdp,
 }
 
 const TERMINAL_ACTIVITY_GRACE: Duration = Duration::from_secs(2);
@@ -1870,6 +1871,25 @@ impl TerminalTab {
             session.name.clone(),
             TabKind::Serial,
             format!("connecting serial://{}@{}", session.host, session.baud_rate),
+            backend,
+            backend_events,
+        );
+        tab.session = Some(session.clone());
+        tab.connected = false;
+        tab
+    }
+
+    pub fn new_rdp(
+        id: String,
+        session: &Session,
+        backend: BackendTx,
+        backend_events: GuardedBackendEventSender,
+    ) -> Self {
+        let mut tab = Self::new(
+            id,
+            session.name.clone(),
+            TabKind::Rdp,
+            format!("connecting rdp {}@{}:{}", session.user, session.host, session.port),
             backend,
             backend_events,
         );

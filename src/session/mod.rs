@@ -267,6 +267,12 @@ impl Ashell {
                                     session,
                                 })
                             }
+                            TabKind::Rdp => {
+                                tab.session.clone().map(|session| SavedTerminalTab::Rdp {
+                                    id: tab.id.clone(),
+                                    session,
+                                })
+                            }
                         }
                     })
                     .collect::<Vec<_>>();
@@ -396,6 +402,28 @@ impl Ashell {
                                 crate::terminal::BackendTx::Serial(backend),
                                 backend_events,
                             ),
+                        )
+                    }
+                    SavedTerminalTab::Rdp { id, session } => {
+                        if id.is_empty() || restored_tab_ids.contains(&id) {
+                            continue;
+                        }
+                        let backend_events =
+                            crate::terminal::GuardedBackendEventSender::new(self.events_tx.clone());
+                        let backend = crate::backend::rdp::spawn_rdp(
+                            id.clone(),
+                            session.host.clone(),
+                            session.port,
+                            session.domain.clone(),
+                            session.user.clone(),
+                            session.password.clone(),
+                            DEFAULT_COLS,
+                            DEFAULT_ROWS,
+                            backend_events.clone(),
+                        );
+                        (
+                            id.clone(),
+                            TerminalTab::new_rdp(id, &session, backend, backend_events),
                         )
                     }
                 };
@@ -1261,6 +1289,8 @@ impl Ashell {
         };
         if session.protocol == "serial" {
             self.open_serial_session(session, cx);
+        } else if session.protocol == "rdp" {
+            self.open_rdp_session(session, cx);
         } else {
             self.open_ssh_session(session, window, cx);
         }
@@ -1477,6 +1507,74 @@ impl Ashell {
             }
         }
         self.status = "serial tab opened".into();
+        self.update_terminal_focus(previous_active_tab.as_deref());
+        self.save_tabs_state_background();
+        cx.notify();
+    }
+
+    /// Open a new RDP remote-desktop tab for the given session.
+    pub(crate) fn open_rdp_session(&mut self, session: Session, cx: &mut Context<Self>) {
+        let previous_active_tab = self.active_tab.clone();
+        tracing::info!(
+            "[session] opening rdp tab for session '{}' ({})",
+            session.name,
+            session.host
+        );
+        let id = Uuid::new_v4().to_string();
+        let backend_events =
+            crate::terminal::GuardedBackendEventSender::new(self.events_tx.clone());
+        // RDP is a pixel-graphics protocol; use a default desktop resolution. This
+        // may later be made configurable per session.
+        const RDP_DEFAULT_WIDTH: u16 = 1280;
+        const RDP_DEFAULT_HEIGHT: u16 = 720;
+        let backend = crate::backend::rdp::spawn_rdp(
+            id.clone(),
+            session.host.clone(),
+            session.port,
+            session.domain.clone(),
+            session.user.clone(),
+            session.password.clone(),
+            RDP_DEFAULT_WIDTH,
+            RDP_DEFAULT_HEIGHT,
+            backend_events.clone(),
+        );
+        self.tabs.push(TerminalTab::new_rdp(
+            id.clone(),
+            &session,
+            backend,
+            backend_events,
+        ));
+        self.active_tab = Some(id.clone());
+        self.connection_progress = Some(crate::app::ConnectionProgress {
+            tab_id: id.clone(),
+            title: rust_i18n::t!("connecting").into(),
+            lines: vec![rust_i18n::t!("starting_connection").into()],
+            failed: false,
+        });
+        self.pane_root = PaneLayout::Single(id.clone());
+        self.focused_pane_path = vec![];
+        let group_id = Uuid::new_v4().to_string();
+        self.tab_groups.push(TabGroup {
+            id: group_id.clone(),
+            title: session.name.clone(),
+            pane_root: PaneLayout::Single(id.clone()),
+            sftp: None,
+            sftp_tab_id: None,
+        });
+        self.active_group = Some(group_id.clone());
+        self.tabs_scroll_handle.scroll_to_item(self.tabs.len() - 1);
+        self.sync_system_tab_to_active_group();
+        if let Some(session_id) = self.active_session_id() {
+            if let Some(index) = self
+                .config
+                .sessions()
+                .iter()
+                .position(|s| s.id == session_id)
+            {
+                self.saved_scroll_handle.scroll_to_item(index);
+            }
+        }
+        self.status = "rdp tab opened".into();
         self.update_terminal_focus(previous_active_tab.as_deref());
         self.save_tabs_state_background();
         cx.notify();
@@ -1716,6 +1814,20 @@ impl Ashell {
                         self.runtime.handle(),
                         tab_id.to_string(),
                         session.clone(),
+                        cols,
+                        rows,
+                        backend_events.clone(),
+                    );
+                    self.tabs[ix].set_backend(backend);
+                }
+                crate::terminal::TabKind::Rdp => {
+                    let backend = crate::backend::rdp::spawn_rdp(
+                        tab_id.to_string(),
+                        session.host.clone(),
+                        session.port,
+                        session.domain.clone(),
+                        session.user.clone(),
+                        session.password.clone(),
                         cols,
                         rows,
                         backend_events.clone(),
@@ -2231,6 +2343,25 @@ impl Ashell {
                     crate::terminal::BackendTx::Serial(backend),
                     backend_events,
                 )
+            }
+            TabKind::Rdp => {
+                let Some(session) = current_session else {
+                    self.status = "cannot split: no session info".into();
+                    cx.notify();
+                    return;
+                };
+                let backend = crate::backend::rdp::spawn_rdp(
+                    new_id.clone(),
+                    session.host.clone(),
+                    session.port,
+                    session.domain.clone(),
+                    session.user.clone(),
+                    session.password.clone(),
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    backend_events.clone(),
+                );
+                TerminalTab::new_rdp(new_id.clone(), &session, backend, backend_events)
             }
         };
         tab.resize(DEFAULT_COLS, DEFAULT_ROWS);
