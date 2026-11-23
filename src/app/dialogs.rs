@@ -159,6 +159,7 @@ impl Ashell {
                         let protocol = view.read(cx).session_protocol.clone();
                         let is_ssh = protocol == "ssh";
                         let is_serial = protocol == "serial";
+                        let is_rdp = protocol == "rdp";
                         let terminal_encoding = view.read(cx).ssh_terminal_encoding;
                         let (session_group, connection_groups) = {
                             let this = view.read(cx);
@@ -190,6 +191,18 @@ impl Ashell {
                                                     &view,
                                                     |this, _, _window, cx| {
                                                         this.set_session_protocol("serial".to_string(), cx);
+                                                    },
+                                                )),
+                                        )
+                                        .child(
+                                            pointer_button("proto-rdp")
+                                                .label("RDP")
+                                                .when(is_rdp, |button| button.primary())
+                                                .on_click(window.listener_for(
+                                                    &view,
+                                                    |this, _, window, cx| {
+                                                        this.set_session_protocol("rdp".to_string(), cx);
+                                                        Self::set_input_value(&this.port_input, "3389", window, cx);
                                                     },
                                                 )),
                                         ),
@@ -226,7 +239,7 @@ impl Ashell {
                                             .child(Input::new(&baud_rate_input).tab_index(3))
                                     )
                                 })
-                                .when(is_ssh, |this| {
+                                .when(is_ssh || is_rdp, |this| {
                                     this.child(
                                         h_flex()
                                             .gap_2()

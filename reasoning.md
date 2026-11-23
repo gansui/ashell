@@ -168,3 +168,44 @@ rdp-rs **没有实现剪贴板虚拟通道**，需要自己补：
 - rdp-rs 作为独立 path 依赖，其旧依赖（yasna 0.3 / x509-parser 0.6 / num_enum 0.4 / hmac 0.7 / rand 0.7 / md4 0.8）需要 Cargo 能解析，理论上作为独立 crate 与 ashell 现代依赖共存。
 - 阶段 2 的后端代码（`rdp.rs`）基于对 rdp-rs API 的人工核对（`Connector`/`RdpClient::read`/`BitmapEvent::decompress`/`RdpError`），已规避已发现的 API 陷阱（`Error::kind()` 不存在→改用 `matches!` 解构 `Error::RdpError`；`BitmapEvent::decompress(self)` 按值消费→先拷出坐标字段）。
 - 所有阶段 2/4 改动**未编译验证**，需在 GitHub Actions 上 `cargo build` 确认。
+
+## 十一、阶段 3/4/5 实际改动（已完成，待编译验证）
+
+这些改动让 RDP 真正接入 tab 创建、保存/恢复、渲染和新建立连接流程：
+
+1. **`src/terminal/mod.rs`**：
+   - `TabKind` 新增 `Rdp` 变体
+   - 新增 `TerminalTab::new_rdp(id, session, backend, backend_events)` 构造器
+
+2. **`src/session/config.rs`**：
+   - `SavedTerminalTab` 新增 `Rdp { id, session }` 变体
+
+3. **`src/session/mod.rs`**：
+   - 保存 tab 的 match 加 `TabKind::Rdp` 分支
+   - 恢复 `SavedTerminalTab::Rdp` 分支（调 `spawn_rdp` + `new_rdp`）
+   - split 的 `match current_kind` 加 `TabKind::Rdp` 分支
+   - `retry_disconnected_tab` 的 match 加 `TabKind::Rdp` 分支
+   - `connect_saved_session` 按 `protocol == "rdp"` 分派到 `open_rdp_session`
+   - 新增 `open_rdp_session(session, cx)`：创建 RDP tab + 启动 spawn_rdp 后端（默认分辨率 1280x720）
+   - `connect_ssh` 新增 `session_protocol == "rdp"` 分支：读取 host/port(3389)/user/password → `Session::rdp` 保存 + `open_rdp_session`
+
+4. **`src/app/mod.rs`**：
+   - 重连后端的 match 加 `TabKind::Rdp` 分支（`spawn_rdp`）
+
+5. **`src/app/ui.rs`**：
+   - `render_pane_tree` 加 RDP 分支（`tab.kind == Rdp` 时不渲染字符终端）
+   - 新增 `render_rdp_pane`：显示连接状态 + 断开提示 + 黑色占位背景，预留 `rdp_frames` 图像渲染接口
+
+6. **`src/app/dialogs.rs`**：
+   - 新建连接对话框加 RDP 协议按钮（点击设 `protocol=rdp` + `port=3389`）
+   - 加 `is_rdp` 判断
+   - `.when(is_ssh || is_rdp, ...)`：RDP 时显示 host/port/user/password 字段
+
+**说明**：RDP 的域名（domain）当前在 `connect_ssh` 里传空串（`String::new()`），尚未提供域名输入框；RDP 渲染面板是占位版（显示状态而非真实位图）。这两项在「剩余工作」中。
+
+## 十二、剩余工作（待后续）
+
+- **真实位图渲染**：用 GPUI 图像元素绘制 `rdp_frames` 的 RGBA，替换 `render_rdp_pane` 的占位。依赖 GPUI 图像渲染 API 确认。
+- **RDP 域名输入框**：在新建连接对话框加 `domain` 字段，`connect_ssh` 的 RDP 分支读取。
+- **CLIPRDR 剪贴板通道**：按 MS-RDPECLIP 自研 RDP 虚拟通道，把宿主剪贴板文本传给远端。
+- **RDP 输入转发**：鼠标/键盘事件 → `RdpClient::write`（Pointer/Key）。

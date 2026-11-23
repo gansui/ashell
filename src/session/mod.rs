@@ -759,6 +759,61 @@ impl Ashell {
             return;
         }
 
+        if self.session_protocol == "rdp" {
+            let session_name = self.session_name_input.read(cx).value().trim().to_string();
+            let session_group = self.session_group.trim().to_string();
+            let host = self.host_input.read(cx).value().trim().to_string();
+            let port = self
+                .port_input
+                .read(cx)
+                .value()
+                .trim()
+                .parse::<u16>()
+                .unwrap_or(3389);
+            let user = self.user_input.read(cx).value().trim().to_string();
+            let password = self.password_input.read(cx).value().to_string();
+            // Windows domain; currently left empty. A dedicated domain field can
+            // be added to the form later.
+            let domain = String::new();
+
+            if host.is_empty() {
+                self.status = "RDP host is required".into();
+                cx.notify();
+                return;
+            }
+
+            let is_editing = self.editing_session_id.is_some();
+            let existing_id = self.editing_session_id.clone();
+            let existing_last_used = existing_id
+                .as_deref()
+                .and_then(|id| self.config.get(id))
+                .and_then(|session| session.last_used.clone());
+
+            let mut session = Session::rdp(host, port, domain, user, password);
+            if !session_name.is_empty() {
+                session.name = session_name;
+            }
+            session.group = session_group;
+            if let Some(id) = existing_id {
+                session.id = id;
+            }
+            session.last_used = existing_last_used;
+
+            self.config.upsert(session.clone());
+            if let Err(err) = self.config.save() {
+                tracing::warn!("failed to save config: {err:#}");
+            }
+
+            if !is_editing {
+                self.open_rdp_session(session, cx);
+            }
+            self.editing_session_id = None;
+            self.active_dialog = None;
+            window.close_dialog(cx);
+            cx.notify();
+            return;
+        }
+
         tracing::info!("[ui] user initiating new ssh connection from form");
         let session_name = self.session_name_input.read(cx).value().trim().to_string();
         let session_group = self.session_group.trim().to_string();
