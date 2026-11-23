@@ -532,7 +532,7 @@ impl Ashell {
                     .gap_2()
                     .child(
                         div()
-                            .text_color(cx.theme().text)
+                            .text_color(cx.theme().muted_foreground)
                             .text_size(ui_rems(1.0))
                             .child(label),
                     )
