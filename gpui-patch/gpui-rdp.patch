@@ -1,81 +1,151 @@
---- a/crates/gpui/src/platform.rs
-+++ b/crates/gpui/src/platform.rs
-@@ -1909,11 +1909,21 @@
-     ) -> Result<AtlasTile>;
- 
-     fn remove(&mut self, tile: AtlasTile);
-+
-+    /// 原地更新一张已存在的 tile。默认不做任何事; Windows/Linux 后端覆写为真正上传。
-+    fn update_tile(&mut self, _tile: &AtlasTile, _bytes: &[u8]) {}
+--- a/crates/gpui_wgpu/src/wgpu_atlas.rs
++++ b/crates/gpui_wgpu/src/wgpu_atlas.rs
+@@ -29,6 +29,12 @@
+     data: Vec<u8>,
  }
  
- #[doc(hidden)]
 +fn fxhash_bytes(bytes: &[u8]) -> u64 {
 +    let mut hasher = collections::FxHasher::default();
 +    hasher.write(bytes);
 +    hasher.finish()
 +}
 +
- pub struct AtlasState<Backend> {
+ struct WgpuAtlasState {
+     device: Arc<wgpu::Device>,
+     queue: Arc<wgpu::Queue>,
+@@ -36,6 +42,7 @@
+     color_texture_format: wgpu::TextureFormat,
+     storage: WgpuAtlasStorage,
      tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
 +    image_hashes: FxHashMap<AtlasKey, u64>,
-     pub backend: Backend,
+     pending_uploads: Vec<PendingUpload>,
  }
  
-@@ -1921,6 +1931,7 @@
-     pub fn new(backend: Backend) -> Self {
-         Self {
-             tiles_by_key: FxHashMap::default(),
-+            image_hashes: FxHashMap::default(),
-             backend,
-         }
+@@ -57,6 +64,7 @@
+             color_texture_format,
+             storage: WgpuAtlasStorage::default(),
+             tiles_by_key: Default::default(),
++            image_hashes: Default::default(),
+             pending_uploads: Vec::new(),
+         }))
      }
-@@ -1931,6 +1942,7 @@
- 
-     pub fn clear(&mut self, reset_backend: impl FnOnce(&mut Backend)) {
-         self.tiles_by_key.clear();
-+        self.image_hashes.clear();
-         reset_backend(&mut self.backend);
-     }
- }
-@@ -1948,7 +1960,20 @@
-         build: &mut dyn FnMut() -> Result<Option<(Size<DevicePixels>, Cow<'a, [u8]>)>>,
+@@ -86,6 +94,7 @@
+     /// Use this for incremental recovery when the device is still valid.
+     pub fn clear(&self) {
+         let mut lock = self.0.lock();
++        lock.image_hashes.clear();
+         lock.storage = WgpuAtlasStorage::default();
+         lock.tiles_by_key.clear();
+         lock.pending_uploads.clear();
+@@ -112,6 +121,17 @@
      ) -> Result<Option<AtlasTile>> {
-         match self.tiles_by_key.entry(key) {
--            Entry::Occupied(entry) => Ok(Some(*entry.get())),
-+            Entry::Occupied(entry) => {
-+                // RDP: 每个逻辑帧复用同一个 ImageId, key 始终命中。这里重新 build 拿到
-+                // 新像素, 若与上次哈希不同则原地 update, 避免每帧申请新 tile 导致图集泄漏。
-+                if let AtlasKey::Image(_) = entry.key() {
-+                    if let Some((_, bytes)) = build()? {
-+                        let hash = fxhash_bytes(&bytes);
-+                        if self.image_hashes.get(entry.key()) != Some(&hash) {
-+                            self.backend.update_tile(entry.get(), &bytes);
-+                            self.image_hashes.insert(entry.key().clone(), hash);
-+                        }
+         let mut lock = self.0.lock();
+         if let Some(tile) = lock.tiles_by_key.get(key) {
++            // RDP: 每帧复用同一 ImageId, 键始终命中。这里重新 build 拿到新像素,
++            // 若与上次哈希不同则原地重传, 避免每帧申请新 tile 导致图集泄漏。
++            if let AtlasKey::Image(_) = key {
++                if let Some((_, bytes)) = build()? {
++                    let hash = fxhash_bytes(&bytes);
++                    if lock.image_hashes.get(key) != Some(&hash) {
++                        lock.upload_texture(tile.texture_id, tile.bounds, &bytes);
++                        lock.image_hashes.insert(key.clone(), hash);
 +                    }
 +                }
-+                Ok(Some(*entry.get()))
 +            }
-             Entry::Vacant(entry) => {
-                 profiling::scope!("new tile");
-                 let Some((size, bytes)) = build()? else {
-@@ -1957,6 +1982,7 @@
-                 let tile = self
-                     .backend
-                     .insert(entry.key().texture_kind(), size, &bytes)?;
-+                self.image_hashes.insert(entry.key().clone(), fxhash_bytes(&bytes));
-                 entry.insert(tile);
-                 Ok(Some(tile))
-             }
-@@ -1964,6 +1990,7 @@
+             Ok(Some(*tile))
+         } else {
+             profiling::scope!("new tile");
+@@ -122,6 +142,7 @@
+                 .allocate(size, key.texture_kind())
+                 .context("failed to allocate")?;
+             lock.upload_texture(tile.texture_id, tile.bounds, &bytes);
++            lock.image_hashes.insert(key.clone(), fxhash_bytes(&bytes));
+             lock.tiles_by_key.insert(key.clone(), tile);
+             Ok(Some(tile))
+         }
+@@ -130,6 +151,7 @@
+     fn remove(&self, key: &AtlasKey) {
+         let mut lock = self.0.lock();
+ 
++        lock.image_hashes.remove(key);
+         let Some(id) = lock.tiles_by_key.remove(key).map(|tile| tile.texture_id) else {
+             return;
+         };
+
+--- a/crates/gpui_windows/src/directx_atlas.rs
++++ b/crates/gpui_windows/src/directx_atlas.rs
+@@ -16,6 +16,12 @@
+ 
+ pub(crate) struct DirectXAtlas(Mutex<DirectXAtlasState>);
+ 
++fn fxhash_bytes(bytes: &[u8]) -> u64 {
++    let mut hasher = collections::FxHasher::default();
++    hasher.write(bytes);
++    hasher.finish()
++}
++
+ struct DirectXAtlasState {
+     device: ID3D11Device,
+     device_context: ID3D11DeviceContext,
+@@ -23,6 +29,7 @@
+     polychrome_textures: AtlasTextureList<DirectXAtlasTexture>,
+     subpixel_textures: AtlasTextureList<DirectXAtlasTexture>,
+     tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
++    image_hashes: FxHashMap<AtlasKey, u64>,
+ }
+ 
+ struct DirectXAtlasTexture {
+@@ -43,6 +50,7 @@
+             polychrome_textures: Default::default(),
+             subpixel_textures: Default::default(),
+             tiles_by_key: Default::default(),
++            image_hashes: Default::default(),
+         }))
      }
  
-     pub fn remove(&mut self, key: &AtlasKey) {
-+        self.image_hashes.remove(key);
-         if let Some(tile) = self.tiles_by_key.remove(key) {
-             self.backend.remove(tile);
+@@ -66,6 +74,7 @@
+         lock.monochrome_textures = AtlasTextureList::default();
+         lock.polychrome_textures = AtlasTextureList::default();
+         lock.subpixel_textures = AtlasTextureList::default();
++        lock.image_hashes.clear();
+         lock.tiles_by_key.clear();
+     }
+ }
+@@ -80,6 +89,18 @@
+     ) -> anyhow::Result<Option<AtlasTile>> {
+         let mut lock = self.0.lock();
+         if let Some(tile) = lock.tiles_by_key.get(key) {
++            // RDP: 每帧复用同一 ImageId, 键始终命中。这里重新 build 拿到新像素,
++            // 若与上次哈希不同则原地重传, 避免每帧申请新 tile 导致图集泄漏。
++            if let AtlasKey::Image(_) = key {
++                if let Some((_, bytes)) = build()? {
++                    let hash = fxhash_bytes(&bytes);
++                    if lock.image_hashes.get(key) != Some(&hash) {
++                        let texture = lock.texture(tile.texture_id);
++                        texture.upload(&lock.device_context, tile.bounds, &bytes);
++                        lock.image_hashes.insert(key.clone(), hash);
++                    }
++                }
++            }
+             Ok(Some(*tile))
+         } else {
+             let Some((size, bytes)) = build()? else {
+@@ -90,6 +111,7 @@
+                 .ok_or_else(|| anyhow::anyhow!("failed to allocate"))?;
+             let texture = lock.texture(tile.texture_id);
+             texture.upload(&lock.device_context, tile.bounds, &bytes);
++            lock.image_hashes.insert(key.clone(), fxhash_bytes(&bytes));
+             lock.tiles_by_key.insert(key.clone(), tile);
+             Ok(Some(tile))
          }
+@@ -98,6 +120,7 @@
+     fn remove(&self, key: &AtlasKey) {
+         let mut lock = self.0.lock();
+ 
++        lock.image_hashes.remove(key);
+         let Some(id) = lock.tiles_by_key.remove(key).map(|tile| tile.texture_id) else {
+             return;
+         };
 
 --- a/crates/gpui/src/assets.rs
 +++ b/crates/gpui/src/assets.rs
@@ -95,35 +165,4 @@
      /// Convert this image into a byte slice.
      pub fn as_bytes(&self, frame_index: usize) -> Option<&[u8]> {
          self.data
-
---- a/crates/gpui_windows/src/directx_atlas.rs
-+++ b/crates/gpui_windows/src/directx_atlas.rs
-@@ -128,7 +128,12 @@
-             }
-         }
-     }
--}
-+
-+    fn update_tile(&mut self, tile: &AtlasTile, bytes: &[u8]) {
-+        if let Some(texture) = self.texture(tile.texture_id) {
-+            texture.upload(&self.device_context, tile.bounds, bytes);
-+        }
-+    }}
- 
- impl DirectXAtlasTextures {
-     fn allocate(
-
---- a/crates/gpui_wgpu/src/wgpu_atlas.rs
-+++ b/crates/gpui_wgpu/src/wgpu_atlas.rs
-@@ -156,6 +156,10 @@
-             }
-         }
-     }
-+
-+    fn update_tile(&mut self, tile: &AtlasTile, bytes: &[u8]) {
-+        self.upload_texture(tile.texture_id, tile.bounds, bytes);
-+    }
- }
- 
- impl WgpuAtlasTextures {
 
