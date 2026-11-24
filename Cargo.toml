@@ -18,11 +18,11 @@ csv = "1"
 directories = "5"
 encoding_rs = "0.8"
 flate2 = "1"
-gpui = { git = "https://github.com/gansui/zed", rev = "6adeeffa8324e3cbf3c4e3f65303a44e8e46e87d" }
-gpui_platform = { git = "https://github.com/gansui/zed", rev = "6adeeffa8324e3cbf3c4e3f65303a44e8e46e87d", features = ["font-kit", "runtime_shaders", "wayland", "x11"] }
+gpui = { git = "https://github.com/gansui/zed", rev = "93801c3465cf61adc05022e0ea1ae61c42e73275" }
+gpui_platform = { git = "https://github.com/gansui/zed", rev = "93801c3465cf61adc05022e0ea1ae61c42e73275", features = ["font-kit", "runtime_shaders", "wayland", "x11"] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "ca85b5588f5feea021f1ee86cb13703dc6f30ec4" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "ca85b5588f5feea021f1ee86cb13703dc6f30ec4" }
-menu = { git = "https://github.com/gansui/zed", rev = "6adeeffa8324e3cbf3c4e3f65303a44e8e46e87d" }
+menu = { git = "https://github.com/gansui/zed", rev = "93801c3465cf61adc05022e0ea1ae61c42e73275" }
 portable-pty = "0.8"
 rfd = "0.15"
 russh = "0.49"
