@@ -20,8 +20,8 @@ encoding_rs = "0.8"
 flate2 = "1"
 gpui = { git = "https://github.com/gansui/zed", rev = "93801c3465cf61adc05022e0ea1ae61c42e73275" }
 gpui_platform = { git = "https://github.com/gansui/zed", rev = "93801c3465cf61adc05022e0ea1ae61c42e73275", features = ["font-kit", "runtime_shaders", "wayland", "x11"] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "ca85b5588f5feea021f1ee86cb13703dc6f30ec4" }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "ca85b5588f5feea021f1ee86cb13703dc6f30ec4" }
+gpui-component = { git = "https://github.com/gansui/gpui-kit", rev = "7bc52a726b72d1885d30124e534e3d686c547967" }
+gpui-component-assets = { git = "https://github.com/gansui/gpui-kit", rev = "7bc52a726b72d1885d30124e534e3d686c547967" }
 menu = { git = "https://github.com/gansui/zed", rev = "93801c3465cf61adc05022e0ea1ae61c42e73275" }
 portable-pty = "0.8"
 rfd = "0.15"
