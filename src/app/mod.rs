@@ -439,6 +439,9 @@ pub(crate) struct Ashell {
     pub(crate) last_window_bounds: Option<gpui::WindowBounds>,
     /// Accumulated RGBA frame buffers for RDP remote desktop tabs.
     pub(crate) rdp_frames: HashMap<String, RdpFrameState>,
+    /// Set when a bitmap region was composited but its GPU image not yet rebuilt;
+    /// drained once per 16ms tick so many bitmap fragments share a single upload.
+    pub(crate) rdp_rebuild_pending: bool,
     pub(crate) save_lock: std::sync::Arc<std::sync::Mutex<()>>,
     pub(crate) save_latest_seq: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
@@ -1051,6 +1054,7 @@ impl Ashell {
             _subscriptions,
             last_window_bounds: Some(window.window_bounds()),
             rdp_frames: HashMap::new(),
+            rdp_rebuild_pending: false,
             save_lock: std::sync::Arc::new(std::sync::Mutex::new(())),
             save_latest_seq: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         };
@@ -1792,7 +1796,12 @@ impl Ashell {
                             vec![0; frame.width as usize * frame.height as usize * 4];
                     }
                     frame.apply_bitmap(x, y, width, height, &rgba);
-                    frame.rebuild_image();
+                    // Defer the full-frame GPU rebuild to the end of this 16ms
+                    // drain tick. RDP splits one screen update into many bitmap
+                    // fragments; rebuilding the whole texture once per fragment
+                    // (a full clone + upload per fragment) drowns the main thread
+                    // and makes the desktop unresponsive. One rebuild per tick.
+                    self.rdp_rebuild_pending = true;
                 }
                 BackendEvent::RdpStatus { tab_id, text } => {
                     if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
@@ -1848,6 +1857,15 @@ impl Ashell {
         }
         if transfers_changed {
             self.config.set_transfers(self.transfers.clone());
+        }
+        // One full-frame GPU rebuild per drain tick, no matter how many bitmap
+        // fragments arrived: a single texture upload covering the whole desktop
+        // beats one upload per fragment (RDP can split a frame into dozens).
+        if self.rdp_rebuild_pending {
+            for frame in self.rdp_frames.values_mut() {
+                frame.rebuild_image();
+            }
+            self.rdp_rebuild_pending = false;
         }
         changed
     }
