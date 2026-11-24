@@ -54,7 +54,7 @@ impl<S: Read + Write> RdpClient<S> {
     ///     }
     /// }).unwrap()
     /// ```
-    pub fn read<T>(&mut self, callback: T) -> RdpResult<()>
+    pub fn read<T>(&mut self, mut callback: T) -> RdpResult<()>
     where T: FnMut(RdpEvent) {
         let (channel_name, message) = self.mcs.read()?;
         match channel_name.as_str() {
