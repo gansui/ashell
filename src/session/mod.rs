@@ -410,6 +410,12 @@ impl Ashell {
                         }
                         let backend_events =
                             crate::terminal::GuardedBackendEventSender::new(self.events_tx.clone());
+                        // Size the restored RDP desktop to the window viewport so
+                        // it maps 1:1. (This was previously passing character
+                        // DEFAULT_COLS/ROWS, which made the remote font huge.)
+                        let vp = window.viewport_size();
+                        let vw = u32::from(vp.width) as u16;
+                        let vh = u32::from(vp.height) as u16;
                         let backend = crate::backend::rdp::spawn_rdp(
                             id.clone(),
                             session.host.clone(),
@@ -417,8 +423,16 @@ impl Ashell {
                             session.domain.clone(),
                             session.user.clone(),
                             session.password.clone(),
-                            DEFAULT_COLS,
-                            DEFAULT_ROWS,
+                            if vw == 0 {
+                                crate::backend::rdp::DEFAULT_WIDTH
+                            } else {
+                                vw
+                            },
+                            if vh == 0 {
+                                crate::backend::rdp::DEFAULT_HEIGHT
+                            } else {
+                                vh
+                            },
                             backend_events.clone(),
                         );
                         (
@@ -812,7 +826,7 @@ impl Ashell {
             }
 
             if !is_editing {
-                self.open_rdp_session(session, cx);
+                self.open_rdp_session(session, window, cx);
             }
             self.editing_session_id = None;
             self.active_dialog = None;
@@ -1359,7 +1373,7 @@ impl Ashell {
         if session.protocol == "serial" {
             self.open_serial_session(session, cx);
         } else if session.protocol == "rdp" {
-            self.open_rdp_session(session, cx);
+            self.open_rdp_session(session, window, cx);
         } else {
             self.open_ssh_session(session, window, cx);
         }
@@ -1582,7 +1596,12 @@ impl Ashell {
     }
 
     /// Open a new RDP remote-desktop tab for the given session.
-    pub(crate) fn open_rdp_session(&mut self, session: Session, cx: &mut Context<Self>) {
+    pub(crate) fn open_rdp_session(
+        &mut self,
+        session: Session,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let previous_active_tab = self.active_tab.clone();
         tracing::info!(
             "[session] opening rdp tab for session '{}' ({})",
@@ -1592,8 +1611,22 @@ impl Ashell {
         let id = Uuid::new_v4().to_string();
         let backend_events =
             crate::terminal::GuardedBackendEventSender::new(self.events_tx.clone());
-        // RDP is a pixel-graphics protocol; use a default desktop resolution. This
-        // may later be made configurable per session.
+        // RDP is a pixel-graphics protocol; size the remote desktop to match the
+        // current window viewport so the remote screen maps 1:1 (no stretch that
+        // would blow up the font). The default 1280x720 is only a fallback.
+        let vp = window.viewport_size();
+        let width = u32::from(vp.width) as u16;
+        let height = u32::from(vp.height) as u16;
+        let width = if width == 0 {
+            crate::backend::rdp::DEFAULT_WIDTH
+        } else {
+            width
+        };
+        let height = if height == 0 {
+            crate::backend::rdp::DEFAULT_HEIGHT
+        } else {
+            height
+        };
         let backend = crate::backend::rdp::spawn_rdp(
             id.clone(),
             session.host.clone(),
@@ -1601,8 +1634,8 @@ impl Ashell {
             session.domain.clone(),
             session.user.clone(),
             session.password.clone(),
-            crate::backend::rdp::DEFAULT_WIDTH,
-            crate::backend::rdp::DEFAULT_HEIGHT,
+            width,
+            height,
             backend_events.clone(),
         );
         self.tabs.push(TerminalTab::new_rdp(
