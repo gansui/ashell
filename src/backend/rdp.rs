@@ -14,6 +14,7 @@ use std::{
         Mutex,
     },
     thread,
+    time::Duration,
 };
 
 use anyhow::{Result, anyhow};
@@ -92,6 +93,11 @@ fn run_rdp(
     let addr = format!("{host}:{port}");
     let tcp = TcpStream::connect(&addr)?;
     tcp.set_nodelay(true)?;
+    // The blocking `client.read()` in the loop below must periodically time
+    // out so the loop can service queued input commands. Without a read
+    // timeout, a quiet desktop (server sending nothing) parks the thread in
+    // `read()` forever and mouse/keyboard events are never dispatched.
+    tcp.set_read_timeout(Some(Duration::from_millis(50)))?;
 
     // Certificate checks are off by default so self-signed RD hosts work.
     let mut connector = Connector::new()
@@ -178,6 +184,12 @@ fn run_rdp(
         }) {
             Ok(()) => {}
             Err(e) => {
+                // A read timeout is not an error: it's how the loop
+                // escapes the blocking read to service queued input commands
+                // while the desktop is otherwise quiet.
+                if is_timeout_error(&e) {
+                    continue;
+                }
                 if is_disconnect_error(&e) {
                     exit_reason = "rdp server closed the connection".to_string();
                 } else {
@@ -252,6 +264,14 @@ fn handle_rdp_event(
         // are sent through `RdpClient::write`, not received here.
         _ => {}
     }
+}
+
+/// Returns true when the rdp-rs error is a read timeout. A timeout is not
+/// fatal: `set_read_timeout` is what lets the loop below service queued input
+/// commands while the desktop is otherwise quiet.
+fn is_timeout_error(error: &rdp::model::error::Error) -> bool {
+    matches!(error, rdp::model::error::Error::Io(e)
+        if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock))
 }
 
 /// Returns true when the rdp-rs error is a server-requested disconnect.
