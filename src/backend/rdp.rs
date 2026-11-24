@@ -166,7 +166,15 @@ fn run_rdp(
         }
 
         match client.read(|event| {
-            handle_rdp_event(&tab_id, event, &events, &send_queue, &clipboard_text)
+            handle_rdp_event(
+                &tab_id,
+                event,
+                &events,
+                &send_queue,
+                &clipboard_text,
+                width,
+                height,
+            )
         }) {
             Ok(()) => {}
             Err(e) => {
@@ -202,6 +210,8 @@ fn handle_rdp_event(
     events: &GuardedBackendEventSender,
     send_queue: &Arc<Mutex<Vec<Vec<u8>>>>,
     clipboard: &Option<String>,
+    desktop_width: u16,
+    desktop_height: u16,
 ) {
     match event {
         RdpEvent::Bitmap(bitmap) => {
@@ -217,6 +227,8 @@ fn handle_rdp_event(
                         y,
                         width,
                         height,
+                        desktop_width,
+                        desktop_height,
                         rgba,
                     });
                 }

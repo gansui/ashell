@@ -1776,15 +1776,20 @@ impl Ashell {
                     y,
                     width,
                     height,
+                    desktop_width,
+                    desktop_height,
                     rgba,
                 } => {
                     let frame = self.rdp_frames.entry(tab_id.clone()).or_default();
-                    // If the frame buffer is not yet sized, size it from the first
-                    // bitmap region. A full desktop region typically spans the screen.
+                    // Size the frame from the negotiated desktop resolution, not from
+                    // the first bitmap region: the server's first update is often a
+                    // small partial region (cursor, caret, etc.), which would make the
+                    // whole desktop huge when the image is stretched to fill the pane.
                     if frame.width == 0 || frame.height == 0 {
-                        frame.width = width;
-                        frame.height = height;
-                        frame.rgba = vec![0; width as usize * height as usize * 4];
+                        frame.width = desktop_width.max(1);
+                        frame.height = desktop_height.max(1);
+                        frame.rgba =
+                            vec![0; frame.width as usize * frame.height as usize * 4];
                     }
                     frame.apply_bitmap(x, y, width, height, &rgba);
                     frame.rebuild_image();

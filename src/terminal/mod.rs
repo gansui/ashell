@@ -806,6 +806,11 @@ pub enum BackendEvent {
         width: u16,
         /// Destination region height in pixels.
         height: u16,
+        /// Full negotiated desktop width in pixels (the virtual screen size the
+        /// regions are composed onto). Constant for the whole session.
+        desktop_width: u16,
+        /// Full negotiated desktop height in pixels.
+        desktop_height: u16,
         /// Raw RGBA pixel data (4 bytes per pixel, row-major, top to bottom).
         rgba: Vec<u8>,
     },
