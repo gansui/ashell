@@ -191,7 +191,7 @@ impl<S: Read + Write> Client<S> {
         }));
         let client_security_data = client_security_data();
         let client_network_data = client_network_data(trame![
-            channel_def(&"cliprdr".to_string(), 0xC0000000)
+            channel_def(&"cliprdr".to_string(), 0xC0A00000)
         ]);
         let user_data = to_vec(&trame![
             trame![block_header(Some(MessageType::CsCore), Some(client_core_data.length() as u16)), client_core_data],

@@ -278,8 +278,15 @@ pub fn server_security_data() -> Component {
 
 /// Actually we have no more classic channel
 pub fn channel_def(name: &String, options: u32) -> Component {
+    // CHANNEL_DEF.name is a fixed 8-byte UCHAR array; pad with NUL to 8 bytes
+    // (MS-RDPBCGR 2.2.1.3.4.1). A short name like "cliprdr" (7 bytes) must be
+    // padded or the server rejects the whole ConnectInitial.
+    let mut name_bytes = name.as_bytes().to_vec();
+    if name_bytes.len() < 8 {
+        name_bytes.resize(8, 0);
+    }
     component![
-        "name"=> name.as_bytes().to_vec(),
+        "name"=> name_bytes,
         "options" => U32::LE(options)
     ]
 }
