@@ -548,18 +548,33 @@ impl Ashell {
             ),
             None => (position.x.as_f32(), position.y.as_f32(), 0.0, 0.0),
         };
-        let sx = if pane_w > 0.0 {
-            remote_width as f32 / pane_w
+        let (x, y) = if pane_w > 0.0 && pane_h > 0.0 {
+            // The image is drawn with `object_fit: Contain`, so it only fills
+            // the pane when the pane's aspect ratio matches the desktop's. When
+            // they differ, letterbox bars eat part of the pane and the bare
+            // `rel * remote/pane` mapping would aim at pixels off the far edge
+            // (e.g. the bottom of the desktop unreachable). Mirror Contain's
+            // get_bounds here so the mouse lands on the actual image region.
+            let image_ratio = remote_width as f32 / remote_height as f32;
+            let bounds_ratio = pane_w / pane_h;
+            let (disp_w, disp_h) = if bounds_ratio > image_ratio {
+                (remote_width as f32 * (pane_h / remote_height as f32), pane_h)
+            } else {
+                (pane_w, remote_height as f32 * (pane_w / remote_width as f32))
+            };
+            let off_x = (pane_w - disp_w) / 2.0;
+            let off_y = (pane_h - disp_h) / 2.0;
+            let x = ((rel_x - off_x) * (remote_width as f32 / disp_w))
+                .clamp(0.0, remote_width.saturating_sub(1) as f32);
+            let y = ((rel_y - off_y) * (remote_height as f32 / disp_h))
+                .clamp(0.0, remote_height.saturating_sub(1) as f32);
+            (x as u16, y as u16)
         } else {
-            1.0
+            (
+                rel_x.clamp(0.0, remote_width.saturating_sub(1) as f32) as u16,
+                rel_y.clamp(0.0, remote_height.saturating_sub(1) as f32) as u16,
+            )
         };
-        let sy = if pane_h > 0.0 {
-            remote_height as f32 / pane_h
-        } else {
-            1.0
-        };
-        let x = (rel_x * sx).clamp(0.0, remote_width.saturating_sub(1) as f32) as u16;
-        let y = (rel_y * sy).clamp(0.0, remote_height.saturating_sub(1) as f32) as u16;
         if let Some(tab) = self.tabs.iter().find(|t| &t.id == tab_id) {
             tab.send_backend(crate::terminal::BackendCommand::RdpInput(
                 crate::terminal::RdpInputEvent::Pointer(crate::terminal::RdpPointerInput {
