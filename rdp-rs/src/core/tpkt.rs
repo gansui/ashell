@@ -203,7 +203,7 @@ impl<S: Read + Write> Client<S> {
     /// let mut tpkt_nla = tpkt.start_nla(false, &mut Ntlm::new("domain".to_string(), "username".to_string(), "password".to_string()), false);
     /// ```
     pub fn start_nla(self, check_certificate: bool, authentication_protocol: &mut dyn AuthenticationProtocol, restricted_admin_mode: bool) -> RdpResult<Client<S>> {
-        let mut link = self.transport.start_ssl(check_certificate)?;
+        let mut link = self.transport.start_ssl(check_certificate).map_err(|_| Error::RdpError(RdpError::new(RdpErrorKind::Unknown, "NLA TLS 握手失败(SSL 阶段)")))?;
         cssp_connect(&mut link, authentication_protocol, restricted_admin_mode)?;
         Ok(Client::new(link))
     }

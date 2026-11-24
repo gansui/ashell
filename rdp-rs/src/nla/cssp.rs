@@ -166,10 +166,11 @@ fn create_ts_authinfo(auth_info: Vec<u8>) -> Vec<u8> {
 pub fn cssp_connect<S: Read + Write>(link: &mut Link<S>, authentication_protocol: &mut dyn AuthenticationProtocol, restricted_admin_mode: bool) -> RdpResult<()> {
     // first step is to send the negotiate message from authentication protocol
     let negotiate_message = create_ts_request(authentication_protocol.create_negotiate_message()?);
-    link.write(&negotiate_message)?;
+    link.write(&negotiate_message).map_err(|_| Error::RdpError(RdpError::new(RdpErrorKind::Unknown, "NLA step 1/6: 发送 NegTokenInit(NTLM type1) 失败")))?;
 
     // now receive server challenge
-    let server_challenge = read_ts_server_challenge(&(link.read(0)?))?;
+    let server_challenge_raw = link.read(0).map_err(|_| Error::RdpError(RdpError::new(RdpErrorKind::Unknown, "NLA step 2/6: 读取服务器 NTLM challenge(type2) 失败")))?;
+    let server_challenge = read_ts_server_challenge(&server_challenge_raw)?;
 
     // now ask for to authenticate protocol
     let client_challenge = authentication_protocol.read_challenge_message(&server_challenge)?;
@@ -183,10 +184,10 @@ pub fn cssp_connect<S: Read + Write>(link: &mut Link<S>, authentication_protocol
 
     // Now we can send back our challenge payload wit the public key encoded
     let challenge = create_ts_authenticate(client_challenge, security_interface.gss_wrapex(certificate.tbs_certificate.subject_pki.subject_public_key.data)?);
-    link.write(&challenge)?;
+    link.write(&challenge).map_err(|_| Error::RdpError(RdpError::new(RdpErrorKind::Unknown, "NLA step 3/6: 发送 NTLM type3 + TS_Authenticate(加密公钥) 失败")))?;
 
     // now server respond normally with the original public key incremented by one
-    let inc_pub_key = security_interface.gss_unwrapex(&(read_ts_validate(&(link.read(0)?))?))?;
+    let inc_pub_key = security_interface.gss_unwrapex(&(read_ts_validate(&(link.read(0).map_err(|_| Error::RdpError(RdpError::new(RdpErrorKind::Unknown, "NLA step 4/6: 读取服务器公钥校验(TS_Validate) 失败")))?))?))?;
 
     // Check possible man in the middle using cssp
     if BigUint::from_bytes_le(&inc_pub_key) != BigUint::from_bytes_le(certificate.tbs_certificate.subject_pki.subject_public_key.data) + BigUint::new(vec![1]) {
@@ -200,7 +201,7 @@ pub fn cssp_connect<S: Read + Write>(link: &mut Link<S>, authentication_protocol
     let password = if restricted_admin_mode { vec![] } else { authentication_protocol.get_password() };
 
     let credentials = create_ts_authinfo(security_interface.gss_wrapex(&create_ts_credentials(domain, user, password))?);
-    link.write(&credentials)?;
+    link.write(&credentials).map_err(|_| Error::RdpError(RdpError::new(RdpErrorKind::Unknown, "NLA step 5/6: 发送加密的域/用户/密码凭据(TS_Credentials) 失败")))?;
 
     Ok(())
 }

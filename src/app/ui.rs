@@ -6384,6 +6384,41 @@ impl Render for Ashell {
                                                                     )
                                                                 },
                                                             )),
+                                                    )
+                                                    .child(
+                                                        pointer_button(
+                                                            "ssh-connect-progress-copy-error",
+                                                        )
+                                                        .label(t!("copy_error").to_string())
+                                                        .on_click(cx.listener(
+                                                            |this, _, _, cx| {
+                                                                let mut text = String::new();
+                                                                if let Some(progress) =
+                                                                    this.connection_progress
+                                                                        .clone()
+                                                                {
+                                                                    text = progress
+                                                                        .title
+                                                                        .to_string();
+                                                                    let lines: Vec<&str> = progress
+                                                                        .lines
+                                                                        .iter()
+                                                                        .map(|l| l.as_str())
+                                                                        .collect();
+                                                                    if !lines.is_empty() {
+                                                                        text.push('\n');
+                                                                        text.push_str(&lines.join(
+                                                                            "\n",
+                                                                        ));
+                                                                    }
+                                                                    cx.write_to_clipboard(
+                                                                        gpui::ClipboardItem::new_string(
+                                                                            text,
+                                                                        ),
+                                                                    );
+                                                                }
+                                                            },
+                                                        )),
                                                     ),
                                             )
                                         }),
