@@ -78,6 +78,13 @@ impl<S: Read + Write> RdpClient<S> {
                         s.read_to_end(&mut buf)?;
                     }
                 }
+                // Strip the optional 8-byte CHANNEL_PDU_HEADER (Length u32 +
+                // Flags u32) the server prepends to static-virtual-channel data
+                // (sent when the channel is compressed/chunked). Without this the
+                // cliprdr msgType lands at offset 8 and every handler check fails.
+                if buf.len() >= 8 {
+                    buf.drain(..8);
+                }
                 if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
                     let hex: Vec<String> = buf.iter().take(24).map(|b| format!("{:02x}", b)).collect();
                     clip_log!("recv cliprdr {} bytes: {}", buf.len(), hex.join(" "));
