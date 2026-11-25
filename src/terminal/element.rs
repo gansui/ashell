@@ -590,7 +590,13 @@ impl TerminalElement {
                 row: cursor.row,
                 col: cursor.col,
                 shape,
-                color: cx.theme().primary,
+                color: {
+                    let base = cx.theme().primary;
+                    Hsla {
+                        l: (base.l * 1.35).min(0.92),
+                        ..base
+                    }
+                },
                 dim: !show_cursor,
             }
         })
@@ -794,7 +800,7 @@ impl Element for TerminalElement {
             let y = draw_origin.y + prepaint.metrics.line_height * cursor.row as f32;
             // The blink "off" phase dims instead of vanishing, so the caret
             // stays findable while still reading as a blink.
-            let dim = if cursor.dim { 0.5 } else { 1.0 };
+            let dim = if cursor.dim { 0.62 } else { 1.0 };
             match cursor.shape {
                 CursorShape::Hidden => {}
                 CursorShape::Beam => {
@@ -833,7 +839,7 @@ impl Element for TerminalElement {
                     let core = if matches!(cursor.shape, CursorShape::HollowBlock) {
                         0.22
                     } else {
-                        0.5
+                        0.62
                     };
                     window.paint_quad(fill(
                         Bounds::new(
