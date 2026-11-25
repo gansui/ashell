@@ -26,7 +26,15 @@ pub struct RdpClient<S> {
     /// This is the main switch layer of the protocol
     mcs: mcs::Client<S>,
     /// Global channel that implement the basic layer
-    global: global::Client
+    global: global::Client,
+    /// Tracks whether a mouse button is currently held down. A move event
+    /// carries no button, but RDP drag-selection needs `PTRFLAGS_MOVE |
+    /// PTRFLAGS_BUTTON1` while dragging; without remembering the held button a
+    /// plain move would look like a button-less pointer sweep and Windows would
+    /// not select text.
+    pointer_button_down: bool,
+    /// The button held down while drag-selecting, remembered across moves.
+    pointer_down_button: Option<PointerButton>,
 }
 
 impl<S: Read + Write> RdpClient<S> {
@@ -114,15 +122,39 @@ impl<S: Read + Write> RdpClient<S> {
                 // Pointer are sent to global channel
                 // Compute flags
                 let mut flags: u16 = 0;
-                match pointer.button {
-                    PointerButton::Left => flags |= PointerFlag::PtrflagsButton1 as u16,
-                    PointerButton::Right => flags |= PointerFlag::PtrflagsButton2 as u16,
-                    PointerButton::Middle => flags |= PointerFlag::PtrflagsButton3 as u16,
-                    _ => flags |= PointerFlag::PtrflagsMove as u16,
-                }
+                let button_flag = match pointer.button {
+                    PointerButton::Left => PointerFlag::PtrflagsButton1 as u16,
+                    PointerButton::Right => PointerFlag::PtrflagsButton2 as u16,
+                    PointerButton::Middle => PointerFlag::PtrflagsButton3 as u16,
+                    _ => 0,
+                };
 
                 if pointer.down {
-                    flags |= PointerFlag::PtrflagsDown as u16;
+                    // Button press: DOWN | BUTTONn.
+                    flags |= PointerFlag::PtrflagsDown as u16 | button_flag;
+                    self.pointer_button_down = true;
+                    self.pointer_down_button = Some(pointer.button);
+                } else if button_flag != 0 {
+                    // Button release with no movement: just BUTTONn.
+                    flags |= button_flag;
+                    self.pointer_button_down = false;
+                    self.pointer_down_button = None;
+                } else {
+                    // Pure move. If a button is held down (drag-select), keep the
+                    // button flag so the remote keeps selecting text instead of
+                    // sweeping a button-less pointer. Remember the held button.
+                    flags |= PointerFlag::PtrflagsMove as u16;
+                    if self.pointer_button_down {
+                        let held = self
+                            .pointer_down_button
+                            .unwrap_or(PointerButton::Left);
+                        flags |= match held {
+                            PointerButton::Left => PointerFlag::PtrflagsButton1 as u16,
+                            PointerButton::Right => PointerFlag::PtrflagsButton2 as u16,
+                            PointerButton::Middle => PointerFlag::PtrflagsButton3 as u16,
+                            _ => 0,
+                        };
+                    }
                 }
 
                 self.global.write_input_event(ts_pointer_event(Some(flags), Some(pointer.x), Some(pointer.y)), &mut self.mcs)
@@ -299,7 +331,9 @@ impl Connector {
 
         Ok(RdpClient {
             mcs,
-            global
+            global,
+            pointer_button_down: false,
+            pointer_down_button: None
         })
     }
 

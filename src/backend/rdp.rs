@@ -258,10 +258,14 @@ fn handle_rdp_event(
                     }
                 }
             } else if cliprdr_is_format_list(&data) {
-                // Remote -> host: the server announced it copied something (or
-                // cleared its clipboard). Ask it for the CF_UNICODETEXT payload
-                // so we can mirror the remote clipboard into the host.
+                // The server announced a clipboard change (the remote copied
+                // something, or is about to paste and enumerated its formats).
+                // Windows expects a CB_FORMAT_LIST_RESPONSE back or it never
+                // sends the CB_FORMAT_DATA_REQUEST that carries the pasted
+                // payload, so both directions stall. Acknowledge first, then
+                // ask for CF_UNICODETEXT to mirror the remote clipboard.
                 if let Ok(mut q) = send_queue.lock() {
+                    q.push(cliprdr_format_list_response());
                     q.push(cliprdr_format_data_request(13));
                 }
             } else if cliprdr_is_format_data_response(&data) {
@@ -346,8 +350,15 @@ fn cliprdr_is_format_data_response(data: &[u8]) -> bool {
     data.len() >= 2 && u16::from_le_bytes([data[0], data[1]]) == 0x0005
 }
 
+/// Build a `CB_FORMAT_LIST_RESPONSE` (0x0003) acknowledging the server's
+/// format-list announcement. Windows only proceeds to paste (CB_FORMAT_DATA_REQUEST)
+/// after it sees this, so it is required for the host->remote direction too.
+fn cliprdr_format_list_response() -> Vec<u8> {
+    cliprdr_header(0x0003, 0x0001, 0) // msgFlags = CB_RESPONSE
+}
+
 /// Build a `CB_FORMAT_DATA_REQUEST` (0x0004) asking the server for the payload
-/// of `format_id` (CF_UNICODETEXT is 13).
+/// of the given format id (CF_UNICODETEXT = 13).
 fn cliprdr_format_data_request(format_id: u32) -> Vec<u8> {
     let mut data = Vec::with_capacity(4);
     data.extend_from_slice(&format_id.to_le_bytes());
