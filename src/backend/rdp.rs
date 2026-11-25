@@ -141,18 +141,12 @@ fn run_rdp(
     let mut clipboard_text: Option<String> = None;
     let send_queue: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // CLIPRDR initialization: the client sends its Capabilities + Monitor
-    // Ready up front (IronRDP Cliprdr::start does exactly this). The server
-    // then sends its own Capabilities + Monitor Ready, and only after that do
-    // we push Capabilities + Temporary Directory + Format List together (in
-    // `handle_rdp_event`'s monitor-ready branch). Without the client Monitor
-    // Ready the Windows rdpclip never considers the channel up and ignores
-    // every subsequent format list.
-    {
-        let _ = client.write_clipboard(cliprdr_caps());
-        let _ = client.write_clipboard(cliprdr_monitor_ready());
-    }
-
+    // CLIPRDR initialization: as the client we are NOT the initiator. IronRDP's
+    // `Cliprdr::start` returns an empty vec in client mode and FreeRDP's client
+    // likewise sends nothing up front — `CB_MONITOR_READY` is a server-only PDU,
+    // so the client must never send it. We wait for the server's Capabilities +
+    // Monitor Ready, then reply with our Capabilities + Format List (see the
+    // monitor-ready branch in `handle_rdp_event`).
     loop {
         // Dispatch pending commands without blocking the read loop.
         while let Ok(cmd) = commands.try_recv() {
@@ -385,13 +379,6 @@ fn cliprdr_caps() -> Vec<u8> {
     let mut msg = cliprdr_header(0x0007, 0, data.len() as u32); // CB_CLIP_CAPS, msgFlags = 0
     msg.extend_from_slice(&data);
     msg
-}
-
-/// Build a `CB_MONITOR_READY` (0x0001) telling the server the client is ready.
-/// IronRDP encodes it as an empty PDU: msgType + msgFlags(0) + dataLen(0), no
-/// payload (MS-RDPECLIP CLIPRDR_HEADER with no data).
-fn cliprdr_monitor_ready() -> Vec<u8> {
-    cliprdr_header(0x0001, 0, 0)
 }
 
 /// Return true when a cliprdr payload is a `CB_MONITOR_READY` (0x0001): the
