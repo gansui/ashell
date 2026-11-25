@@ -141,12 +141,17 @@ fn run_rdp(
     let mut clipboard_text: Option<String> = None;
     let send_queue: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // CLIPRDR initialization: the *server* is the initiator. Per MS-RDPECLIP
-    // (and IronRDP's Cliprdr::start) the client must NOT send any CLIPRDR PDU
-    // up front. We wait for the server's CB_MONITOR_READY, then send our
-    // capabilities + temporary directory + format list together (in
-    // `handle_rdp_event`). Sending early steals the initiator role and leaves
-    // the server ignoring our format lists.
+    // CLIPRDR initialization: the client sends its Capabilities + Monitor
+    // Ready up front (IronRDP Cliprdr::start does exactly this). The server
+    // then sends its own Capabilities + Monitor Ready, and only after that do
+    // we push Capabilities + Temporary Directory + Format List together (in
+    // `handle_rdp_event`'s monitor-ready branch). Without the client Monitor
+    // Ready the Windows rdpclip never considers the channel up and ignores
+    // every subsequent format list.
+    {
+        let _ = client.write_clipboard(cliprdr_caps());
+        let _ = client.write_clipboard(cliprdr_monitor_ready());
+    }
 
     loop {
         // Dispatch pending commands without blocking the read loop.
