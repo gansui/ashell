@@ -674,6 +674,17 @@ impl Ashell {
                         this.send_rdp_clipboard(&tid, &text);
                     }
                     let key_str = event.keystroke.key.to_ascii_lowercase();
+                    // Send modifier keys down first so a chord like Ctrl+V reaches
+                    // the remote as Ctrl held, then V — not just V.
+                    if event.keystroke.modifiers.control {
+                        this.send_rdp_key(&tid, 0x1d, true);
+                    }
+                    if event.keystroke.modifiers.alt {
+                        this.send_rdp_key(&tid, 0x38, true);
+                    }
+                    if event.keystroke.modifiers.shift {
+                        this.send_rdp_key(&tid, 0x2a, true);
+                    }
                     if let Some(code) = rdp_scancode_for_key(&key_str) {
                         this.send_rdp_key(&tid, code, true);
                     }
@@ -686,6 +697,13 @@ impl Ashell {
                     if let Some(code) = rdp_scancode_for_key(&key_str) {
                         this.send_rdp_key(&tid, code, false);
                     }
+                    // Release modifier keys after the main key, mirroring the
+                    // down order in on_key_down. Releasing a modifier that was
+                    // never pressed is harmless (Windows key release is idempotent)
+                    // and avoids needing per-tab pressed-modifier state.
+                    this.send_rdp_key(&tid, 0x1d, false);
+                    this.send_rdp_key(&tid, 0x38, false);
+                    this.send_rdp_key(&tid, 0x2a, false);
                 }
             }))
             .on_mouse_move(cx.listener({
