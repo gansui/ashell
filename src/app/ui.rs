@@ -5629,22 +5629,23 @@ impl Ashell {
                             let active_tab_changed =
                                 this.active_tab.as_deref() != Some(tab_id_clone2.as_str());
                             this.focus_pane_with_id(tab_id_clone2.clone());
+                            // Sync the host clipboard into the remote every time the
+                            // RDP pane is clicked, not only on tab switch. The user
+                            // copies in the host then clicks into the pane to paste;
+                            // a tab that is already active would otherwise never push
+                            // the fresh clipboard until the next keystroke.
+                            let is_rdp = this
+                                .tabs
+                                .iter()
+                                .find(|t| t.id == tab_id_clone2.as_str())
+                                .is_some_and(|t| t.kind == crate::terminal::TabKind::Rdp);
+                            if is_rdp
+                                && let Some(clip) = cx.read_from_clipboard()
+                                && let Some(text) = clip.text()
+                            {
+                                this.send_rdp_clipboard(&tab_id_clone2, &text);
+                            }
                             if active_tab_changed {
-                                // Pushing the host clipboard into the remote on tab
-                                // switch makes A->B paste feel immediate: the moment
-                                // the RDP pane becomes the active window, its clipboard
-                                // is re-synced without waiting for the next keystroke.
-                                let is_rdp = this
-                                    .tabs
-                                    .iter()
-                                    .find(|t| t.id == tab_id_clone2.as_str())
-                                    .is_some_and(|t| t.kind == crate::terminal::TabKind::Rdp);
-                                if is_rdp
-                                    && let Some(clip) = cx.read_from_clipboard()
-                                    && let Some(text) = clip.text()
-                                {
-                                    this.send_rdp_clipboard(&tab_id_clone2, &text);
-                                }
                                 this.prompt_active_ssh_reconnect_if_needed(window, cx);
                             }
                             cx.notify();
