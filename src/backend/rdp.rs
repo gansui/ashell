@@ -453,14 +453,16 @@ fn cliprdr_format_list_response() -> Vec<u8> {
 /// that flag marks a reply to a request, and announcing a change is a fresh
 /// event, not a reply.
 fn cliprdr_format_list_request() -> Vec<u8> {
-    // Long-format-name + Unicode (no ASCII_NAMES flag) encoding, as in
-    // IronRDP FormatList::new_unicode. Each entry is formatId (u32) + a
-    // UTF-16 null-terminated name. An empty name is the two-byte null
-    // terminator [0x00, 0x00], so one CF_UNICODETEXT entry is 4 + 2 = 6 bytes
-    // and the full data is 2(cFormats) + 2(pad) + 6 = 10 bytes.
-    let mut data = Vec::with_capacity(10);
-    data.extend_from_slice(&1u16.to_le_bytes()); // cFormats = 1
-    data.extend_from_slice(&0u16.to_le_bytes()); // pad
+    // Long-format-name + Unicode (no ASCII_NAMES flag) encoding. Both FreeRDP
+    // (`cliprdr_packet_format_list_new`) and IronRDP (`FormatList::encode`) write
+    // the format list as a bare sequence of entries — NO cFormats/pad header —
+    // and set dataLen to the sum of the entries. Windows rdpclip parses it that
+    // way (long-name pass: formatId u32, then the null-terminated name). The
+    // 2-byte cFormats/pad MS-RDPECLIP header makes rdpclip misparse offset 0 as
+    // formatId=1, so it never takes ownership of CF_UNICODETEXT and never issues
+    // a format data request on paste. An empty name is the UTF-16 null [0,0], so
+    // one CF_UNICODETEXT entry is 4 + 2 = 6 bytes and dataLen is 6.
+    let mut data = Vec::with_capacity(6);
     data.extend_from_slice(&13u32.to_le_bytes()); // CF_UNICODETEXT formatId
     data.extend_from_slice(&0u16.to_le_bytes()); // formatName = UTF-16 null terminator
     let mut msg = cliprdr_header(0x0002, 0, data.len() as u32); // CB_FORMAT_LIST
