@@ -142,6 +142,7 @@ struct CursorLayout {
     col: usize,
     shape: CursorShape,
     color: Hsla,
+    dim: bool,
 }
 
 pub struct TerminalElement {
@@ -585,14 +586,12 @@ impl TerminalElement {
                 CursorStyle::Beam => CursorShape::Beam,
                 CursorStyle::BeamBlink => CursorShape::Beam,
             };
-            if !show_cursor {
-                shape = CursorShape::Hidden;
-            }
             CursorLayout {
                 row: cursor.row,
                 col: cursor.col,
                 shape,
                 color: cx.theme().primary,
+                dim: !show_cursor,
             }
         })
     }
@@ -793,38 +792,65 @@ impl Element for TerminalElement {
             }
             let x = draw_origin.x + prepaint.metrics.cell_width * cursor.col as f32;
             let y = draw_origin.y + prepaint.metrics.line_height * cursor.row as f32;
+            // The blink "off" phase dims instead of vanishing, so the caret
+            // stays findable while still reading as a blink.
+            let dim = if cursor.dim { 0.5 } else { 1.0 };
             match cursor.shape {
                 CursorShape::Hidden => {}
                 CursorShape::Beam => {
                     window.paint_quad(fill(
                         Bounds::new(
-                            point(x, y),
-                            gpui::size(px(2.), prepaint.metrics.line_height),
+                            point(x - px(1.5), y),
+                            gpui::size(px(6.), prepaint.metrics.line_height),
                         ),
-                        cursor.color,
+                        cursor.color.opacity(0.28 * dim),
+                    ));
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(x, y),
+                            gpui::size(px(3.), prepaint.metrics.line_height),
+                        ),
+                        cursor.color.opacity(dim),
                     ));
                 }
                 CursorShape::Underline => {
                     window.paint_quad(fill(
                         Bounds::new(
-                            point(x, y + prepaint.metrics.line_height - px(2.)),
-                            gpui::size(prepaint.metrics.cell_width, px(2.)),
+                            point(x, y + prepaint.metrics.line_height - px(4.)),
+                            gpui::size(prepaint.metrics.cell_width, px(5.)),
                         ),
-                        cursor.color,
+                        cursor.color.opacity(0.28 * dim),
+                    ));
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(x, y + prepaint.metrics.line_height - px(3.)),
+                            gpui::size(prepaint.metrics.cell_width, px(3.)),
+                        ),
+                        cursor.color.opacity(dim),
                     ));
                 }
                 CursorShape::Block | CursorShape::HollowBlock => {
-                    let alpha = if matches!(cursor.shape, CursorShape::HollowBlock) {
-                        0.18
+                    let core = if matches!(cursor.shape, CursorShape::HollowBlock) {
+                        0.22
                     } else {
-                        0.32
+                        0.5
                     };
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(x - px(1.), y - px(1.)),
+                            gpui::size(
+                                prepaint.metrics.cell_width + px(2.),
+                                prepaint.metrics.line_height + px(2.),
+                            ),
+                        ),
+                        cursor.color.opacity(0.3 * dim),
+                    ));
                     window.paint_quad(fill(
                         Bounds::new(
                             point(x, y),
                             gpui::size(prepaint.metrics.cell_width, prepaint.metrics.line_height),
                         ),
-                        cursor.color.opacity(alpha),
+                        cursor.color.opacity(core * dim),
                     ));
                 }
             }
