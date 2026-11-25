@@ -304,13 +304,15 @@ fn handle_rdp_event(
                     let _ = events.send(BackendEvent::RemoteClipboard(text));
                 }
             } else if cliprdr_is_monitor_ready(&data) {
-                // The server signaled the CLIPRDR channel is up. Match FreeRDP's
-                // `wf_cliprdr_monitor_ready` (wf_cliprdr.c:1827-1843): the client
-                // replies with only its Capabilities + a Format List. FreeRDP does
-                // NOT send a Temporary Directory here; sending one can leave rdpclip
-                // waiting on a file-clip handshake it never starts.
+                // The server signaled the CLIPRDR channel is up. Match IronRDP's
+                // client `initiate_copy` in the Initialization state (lib.rs
+                // 961-972): reply with Capabilities + Temporary Directory +
+                // Format List as a batch. The Temporary Directory is part of the
+                // Microsoft initialization handshake rdpclip expects before it
+                // will accept the client's format list.
                 if let Ok(mut q) = send_queue.lock() {
                     q.push(cliprdr_caps());
+                    q.push(cliprdr_temp_directory());
                     q.push(cliprdr_format_list_request());
                 }
             } else {
@@ -377,6 +379,22 @@ fn cliprdr_caps() -> Vec<u8> {
     // not long names — the server already advertises 0x3e (which includes 0x2).
     data.extend_from_slice(&0x00000002u32.to_le_bytes()); // generalFlags = long format names
     let mut msg = cliprdr_header(0x0007, 0, data.len() as u32); // CB_CLIP_CAPS, msgFlags = 0
+    msg.extend_from_slice(&data);
+    msg
+}
+
+/// Build a `CB_TEMP_DIRECTORY` (0x0006): IronRDP's client `initiate_copy` sends
+/// this together with capabilities and the format list in the Initialization
+/// state. Microsoft's rdpclip may not accept a format list until the client has
+/// declared its temp directory. Layout is the 8-byte header + a 520-byte
+/// UTF-16LE null-terminated path buffer.
+fn cliprdr_temp_directory() -> Vec<u8> {
+    let mut data = vec![0u8; 520];
+    let path = ".cliprdr";
+    for (i, unit) in path.encode_utf16().enumerate() {
+        data[i * 2..i * 2 + 2].copy_from_slice(&unit.to_le_bytes());
+    }
+    let mut msg = cliprdr_header(0x0006, 0, data.len() as u32);
     msg.extend_from_slice(&data);
     msg
 }
