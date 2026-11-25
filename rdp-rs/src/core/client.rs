@@ -68,7 +68,6 @@ impl<S: Read + Write> RdpClient<S> {
         match channel_name.as_str() {
             "global" => self.global.read(message, &mut self.mcs, callback),
             "cliprdr" => {
-                clip_log!("recv cliprdr channel data");
                 // A raw clipboard virtual-channel payload from the server.
                 let mut buf = Vec::new();
                 match message {
@@ -79,6 +78,10 @@ impl<S: Read + Write> RdpClient<S> {
                         s.read_to_end(&mut buf)?;
                     }
                 }
+                if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+                    let hex: Vec<String> = buf.iter().take(24).map(|b| format!("{:02x}", b)).collect();
+                    clip_log!("recv cliprdr {} bytes: {}", buf.len(), hex.join(" "));
+                }
                 callback(RdpEvent::Cliprdr(buf));
                 Ok(())
             }
@@ -88,7 +91,10 @@ impl<S: Read + Write> RdpClient<S> {
 
     /// Send a raw payload to the clipboard virtual channel (cliprdr).
     pub fn write_clipboard(&mut self, data: Vec<u8>) -> RdpResult<()> {
-        clip_log!("-> write_clipboard {} bytes", data.len());
+        if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+            let hex: Vec<String> = data.iter().take(24).map(|b| format!("{:02x}", b)).collect();
+            clip_log!("-> write_clipboard {} bytes: {}", data.len(), hex.join(" "));
+        }
         self.mcs.write(&"cliprdr".to_string(), data)
     }
 

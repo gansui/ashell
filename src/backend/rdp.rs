@@ -391,10 +391,15 @@ fn cliprdr_format_list_response() -> Vec<u8> {
 /// that flag marks a reply to a request, and announcing a change is a fresh
 /// event, not a reply.
 fn cliprdr_format_list_request() -> Vec<u8> {
-    let mut data = Vec::with_capacity(8);
+    // Long-format-name encoding (negotiated via cliprdr_caps: long format
+    // names). Each format entry is formatId (u32) + a LenField format name.
+    // An empty format name is a single 0x00 byte, so one CF_UNICODETEXT entry
+    // is 2(cFormats) + 2(pad) + 4(formatId) + 1(empty name) = 9 bytes.
+    let mut data = Vec::with_capacity(9);
     data.extend_from_slice(&1u16.to_le_bytes()); // cFormats = 1
     data.extend_from_slice(&0u16.to_le_bytes()); // pad
     data.extend_from_slice(&13u32.to_le_bytes()); // CF_UNICODETEXT formatId
+    data.push(0x00); // formatName LenField: length 0 (empty name)
     let mut msg = cliprdr_header(0x0002, 0, data.len() as u32); // CB_FORMAT_LIST
     msg.extend_from_slice(&data);
     msg
