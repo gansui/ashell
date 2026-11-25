@@ -355,16 +355,16 @@ fn cliprdr_caps() -> Vec<u8> {
     // a length-prefixed / null-terminated UTF-16 name). 0x10 is CAN_LOCK_CLIPDATA,
     // not long names — the server already advertises 0x3e (which includes 0x2).
     data.extend_from_slice(&0x00000002u32.to_le_bytes()); // generalFlags = long format names
-    let mut msg = cliprdr_header(0x0007, 0x0001, data.len() as u32); // msgFlags = CB_RESPONSE
+    let mut msg = cliprdr_header(0x0007, 0, data.len() as u32); // CB_CLIP_CAPS, msgFlags = 0
     msg.extend_from_slice(&data);
     msg
 }
 
 /// Build a `CB_MONITOR_READY` (0x0001) telling the server the client is ready.
+/// IronRDP encodes it as an empty PDU: msgType + msgFlags(0) + dataLen(0), no
+/// payload (MS-RDPECLIP CLIPRDR_HEADER with no data).
 fn cliprdr_monitor_ready() -> Vec<u8> {
-    let mut msg = cliprdr_header(0x0001, 0, 4);
-    msg.extend_from_slice(&0u32.to_le_bytes()); // shareId
-    msg
+    cliprdr_header(0x0001, 0, 0)
 }
 
 /// Build a `CB_TEMP_DIRECTORY` (0x0006) telling the server where the client
