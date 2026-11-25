@@ -314,6 +314,19 @@ fn handle_rdp_event(
                     q.push(cliprdr_temp_directory());
                     q.push(cliprdr_format_list_request());
                 }
+            } else {
+                // Diagnostic catch-all: log any cliprdr payload we don't
+                // recognize so we can see every PDU the server sends.
+                let msg_type = if data.len() >= 2 {
+                    u16::from_le_bytes([data[0], data[1]])
+                } else {
+                    0
+                };
+                eprintln!(
+                    "[rdp-clip] UNHANDLED cliprdr msgType=0x{:04x} len={}",
+                    msg_type,
+                    data.len()
+                );
             }
         }
         // Pointer / Key events are input from the client to the server; they
