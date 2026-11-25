@@ -141,13 +141,12 @@ fn run_rdp(
     let mut clipboard_text: Option<String> = None;
     let send_queue: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // Advertise clipboard capabilities (CLIPRDR) once connected.
-    let _ = client.write_clipboard(cliprdr_caps());
-    let _ = client.write_clipboard(cliprdr_monitor_ready());
-    // Microsoft's CLIPRDR server also expects a temporary-directory PDU as part
-    // of channel initialization (IronRDP sends it on its first initiate_copy
-    // together with the capabilities and format list).
-    let _ = client.write_clipboard(cliprdr_temp_directory());
+    // CLIPRDR initialization: the *server* is the initiator. Per MS-RDPECLIP
+    // (and IronRDP's Cliprdr::start) the client must NOT send any CLIPRDR PDU
+    // up front. We wait for the server's CB_MONITOR_READY, then send our
+    // capabilities + temporary directory + format list together (in
+    // `handle_rdp_event`). Sending early steals the initiator role and leaves
+    // the server ignoring our format lists.
 
     loop {
         // Dispatch pending commands without blocking the read loop.
@@ -305,6 +304,16 @@ fn handle_rdp_event(
                 if let Some(text) = cliprdr_decode_text_response(&data) {
                     let _ = events.send(BackendEvent::RemoteClipboard(text));
                 }
+            } else if cliprdr_is_monitor_ready(&data) {
+                // The server signaled the CLIPRDR channel is up. The client is
+                // now the responder: send its capabilities, temporary directory
+                // and an initial format list in one batch, exactly like IronRDP's
+                // `initiate_copy` in the Initialization state.
+                if let Ok(mut q) = send_queue.lock() {
+                    q.push(cliprdr_caps());
+                    q.push(cliprdr_temp_directory());
+                    q.push(cliprdr_format_list_request());
+                }
             }
         }
         // Pointer / Key events are input from the client to the server; they
@@ -385,6 +394,13 @@ fn cliprdr_temp_directory() -> Vec<u8> {
     let mut msg = cliprdr_header(0x0006, 0, data.len() as u32);
     msg.extend_from_slice(&data);
     msg
+}
+
+/// Return true when a cliprdr payload is a `CB_MONITOR_READY` (0x0001): the
+/// server telling the client the CLIPRDR channel is initialized and the
+/// client should now send its capabilities and format list.
+fn cliprdr_is_monitor_ready(data: &[u8]) -> bool {
+    data.len() >= 2 && u16::from_le_bytes([data[0], data[1]]) == 0x0001
 }
 
 /// Return true when a received cliprdr payload is a `CB_FORMAT_DATA_REQUEST`
