@@ -161,7 +161,14 @@ fn run_rdp(
                     }
                 }
                 BackendCommand::RdpSetClipboard(text) => {
-                    clipboard_text = Some(text);
+                    clipboard_text = Some(text.clone());
+                    // Advertise the host clipboard to the server so the remote
+                    // gets the text pushed into its clipboard, not only when it
+                    // pastes. Without a CB_FORMAT_LIST_REQUEST the server has no
+                    // way to know the host side changed, so A->B stays stale.
+                    if let Ok(mut q) = send_queue.lock() {
+                        q.push(cliprdr_format_list_request());
+                    }
                 }
                 _ => {}
             }
@@ -355,6 +362,20 @@ fn cliprdr_is_format_data_response(data: &[u8]) -> bool {
 /// after it sees this, so it is required for the host->remote direction too.
 fn cliprdr_format_list_response() -> Vec<u8> {
     cliprdr_header(0x0003, 0x0001, 0) // msgFlags = CB_RESPONSE
+}
+
+/// Build a `CB_FORMAT_LIST_REQUEST` (0x0001) announcing the host clipboard now
+/// holds CF_UNICODETEXT. The server answers with a CB_FORMAT_LIST_RESPONSE and
+/// then a CB_FORMAT_DATA_REQUEST, which the loop answers with the cached text —
+/// pushing the host clipboard into the remote without waiting for a paste.
+fn cliprdr_format_list_request() -> Vec<u8> {
+    let mut data = Vec::with_capacity(8);
+    data.extend_from_slice(&1u16.to_le_bytes()); // cFormats = 1
+    data.extend_from_slice(&0u16.to_le_bytes()); // pad
+    data.extend_from_slice(&13u32.to_le_bytes()); // CF_UNICODETEXT formatId
+    let mut msg = cliprdr_header(0x0001, 0x0001, data.len() as u32); // CB_RESPONSE
+    msg.extend_from_slice(&data);
+    msg
 }
 
 /// Build a `CB_FORMAT_DATA_REQUEST` (0x0004) asking the server for the payload
