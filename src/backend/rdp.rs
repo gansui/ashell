@@ -346,7 +346,12 @@ fn cliprdr_caps() -> Vec<u8> {
     data.extend_from_slice(&0x0001u16.to_le_bytes()); // capabilitySetType = General
     data.extend_from_slice(&12u16.to_le_bytes()); // lengthCapability
     data.extend_from_slice(&0x0002u32.to_le_bytes()); // version = CB_CAPS_VERSION_2
-    data.extend_from_slice(&0x00000002u32.to_le_bytes()); // generalFlags = long format names
+    // generalFlags must advertise CB_USE_LONG_FORMAT_NAMES (0x10): the
+    // CB_FORMAT_LIST entries below are encoded with a LenField format name
+    // (formatId u32 + LenField), which is the long-format-name form. The old
+    // 0x2 (CB_FILECLIP_NO_FILE_PATHS) did not imply long names, so the server
+    // parsed our format list as short 32-byte names and dropped it.
+    data.extend_from_slice(&0x00000010u32.to_le_bytes()); // generalFlags = long format names
     let mut msg = cliprdr_header(0x0007, 0x0001, data.len() as u32); // msgFlags = CB_RESPONSE
     msg.extend_from_slice(&data);
     msg
