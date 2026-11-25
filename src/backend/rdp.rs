@@ -144,6 +144,10 @@ fn run_rdp(
     // Advertise clipboard capabilities (CLIPRDR) once connected.
     let _ = client.write_clipboard(cliprdr_caps());
     let _ = client.write_clipboard(cliprdr_monitor_ready());
+    // Microsoft's CLIPRDR server also expects a temporary-directory PDU as part
+    // of channel initialization (IronRDP sends it on its first initiate_copy
+    // together with the capabilities and format list).
+    let _ = client.write_clipboard(cliprdr_temp_directory());
 
     loop {
         // Dispatch pending commands without blocking the read loop.
@@ -360,6 +364,26 @@ fn cliprdr_caps() -> Vec<u8> {
 fn cliprdr_monitor_ready() -> Vec<u8> {
     let mut msg = cliprdr_header(0x0001, 0, 4);
     msg.extend_from_slice(&0u32.to_le_bytes()); // shareId
+    msg
+}
+
+/// Build a `CB_TEMP_DIRECTORY` (0x0006) telling the server where the client
+/// stores temporary files. Microsoft's CLIPRDR server expects this as part of
+/// channel initialization; without it the server may refuse to treat the
+/// client's clipboard as ready and never answer a `CB_FORMAT_LIST` with a
+/// `CB_FORMAT_DATA_REQUEST`. IronRDP sends it on its first `initiate_copy`
+/// together with capabilities and the format list. Layout is the 8-byte
+/// header + a 520-byte UTF-16LE null-terminated path buffer (260 wchar_t).
+fn cliprdr_temp_directory() -> Vec<u8> {
+    let mut data = vec![0u8; 520];
+    let path = ".cliprdr";
+    for (i, unit) in path.encode_utf16().enumerate() {
+        data[i * 2..i * 2 + 2].copy_from_slice(&unit.to_le_bytes());
+    }
+    data[path.len() * 2] = 0; // UTF-16 null terminator (two zero bytes, already zero)
+    data[path.len() * 2 + 1] = 0;
+    let mut msg = cliprdr_header(0x0006, 0, data.len() as u32);
+    msg.extend_from_slice(&data);
     msg
 }
 
