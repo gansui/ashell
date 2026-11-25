@@ -241,8 +241,13 @@ impl<S: Read + Write> Client<S> {
         // the server. The server returns virtual-channel ids in the same order
         // the client declared them in the network data.
         if let Some(server_data) = &self.server_data {
+            if std::env::var_os("RDP_CLIP_DEBUG").is_some() {
+                eprintln!("[rdp-clip] server channel_ids = {:?}", server_data.channel_ids);
+            }
             if let Some(&cliprdr_id) = server_data.channel_ids.first() {
                 self.channel_ids.insert("cliprdr".to_string(), cliprdr_id);
+            } else if std::env::var_os("RDP_CLIP_DEBUG").is_some() {
+                eprintln!("[rdp-clip] WARNING: server assigned no static channels — cliprdr disabled");
             }
         }
 
