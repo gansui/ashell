@@ -104,12 +104,13 @@ impl<S: Read + Write> RdpClient<S> {
         }
         // MS-RDPBCGR: every static-virtual-channel payload is wrapped in an
         // 8-byte CHANNEL_PDU_HEADER (Length u32 LE = total payload length,
-        // Flags u32 LE = 0). The server wraps everything it sends (we strip it
-        // on read above), so we must wrap what we send too, or the server
+        // Flags u32 LE = CHANNEL_FLAG_FIRST | CHANNEL_FLAG_LAST for a
+        // single chunk). The server wraps everything it sends (we strip it on
+        // read above), so we must wrap what we send too, or the server
         // misparses our CLIPRDR PDUs and ignores them.
         let mut pdu = Vec::with_capacity(data.len() + 8);
         pdu.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        pdu.extend_from_slice(&0u32.to_le_bytes());
+        pdu.extend_from_slice(&0x03u32.to_le_bytes()); // FIRST | LAST
         pdu.extend_from_slice(&data);
         self.mcs.write(&"cliprdr".to_string(), pdu)
     }
