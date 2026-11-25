@@ -310,13 +310,13 @@ fn handle_rdp_event(
                     let _ = events.send(BackendEvent::RemoteClipboard(text));
                 }
             } else if cliprdr_is_monitor_ready(&data) {
-                // The server signaled the CLIPRDR channel is up. The client is
-                // now the responder: send its capabilities, temporary directory
-                // and an initial format list in one batch, exactly like IronRDP's
-                // `initiate_copy` in the Initialization state.
+                // The server signaled the CLIPRDR channel is up. Match FreeRDP's
+                // `wf_cliprdr_monitor_ready` (wf_cliprdr.c:1827-1843): the client
+                // replies with only its Capabilities + a Format List. FreeRDP does
+                // NOT send a Temporary Directory here; sending one can leave rdpclip
+                // waiting on a file-clip handshake it never starts.
                 if let Ok(mut q) = send_queue.lock() {
                     q.push(cliprdr_caps());
-                    q.push(cliprdr_temp_directory());
                     q.push(cliprdr_format_list_request());
                 }
             } else {
@@ -392,26 +392,6 @@ fn cliprdr_caps() -> Vec<u8> {
 /// payload (MS-RDPECLIP CLIPRDR_HEADER with no data).
 fn cliprdr_monitor_ready() -> Vec<u8> {
     cliprdr_header(0x0001, 0, 0)
-}
-
-/// Build a `CB_TEMP_DIRECTORY` (0x0006) telling the server where the client
-/// stores temporary files. Microsoft's CLIPRDR server expects this as part of
-/// channel initialization; without it the server may refuse to treat the
-/// client's clipboard as ready and never answer a `CB_FORMAT_LIST` with a
-/// `CB_FORMAT_DATA_REQUEST`. IronRDP sends it on its first `initiate_copy`
-/// together with capabilities and the format list. Layout is the 8-byte
-/// header + a 520-byte UTF-16LE null-terminated path buffer (260 wchar_t).
-fn cliprdr_temp_directory() -> Vec<u8> {
-    let mut data = vec![0u8; 520];
-    let path = ".cliprdr";
-    for (i, unit) in path.encode_utf16().enumerate() {
-        data[i * 2..i * 2 + 2].copy_from_slice(&unit.to_le_bytes());
-    }
-    data[path.len() * 2] = 0; // UTF-16 null terminator (two zero bytes, already zero)
-    data[path.len() * 2 + 1] = 0;
-    let mut msg = cliprdr_header(0x0006, 0, data.len() as u32);
-    msg.extend_from_slice(&data);
-    msg
 }
 
 /// Return true when a cliprdr payload is a `CB_MONITOR_READY` (0x0001): the
