@@ -1809,6 +1809,12 @@ impl Ashell {
                     }
                     self.status = text.into();
                 }
+                // Remote -> host clipboard: the RDP server copied something on the
+                // remote machine; mirror that text into the host system clipboard so
+                // the user can paste it locally.
+                BackendEvent::RemoteClipboard(text) => {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                }
                 BackendEvent::TerminalTitleChanged { tab_id, title } => {
                     let local_path = crate::session::parse_local_directory_title(&title);
                     if let Some(path) = local_path {

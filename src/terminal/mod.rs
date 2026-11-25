@@ -814,6 +814,10 @@ pub enum BackendEvent {
         /// Raw RGBA pixel data (4 bytes per pixel, row-major, top to bottom).
         rgba: Vec<u8>,
     },
+    /// Text the remote copied (server -> client over CLIPRDR). The host
+    /// should write this into its local system clipboard so the user can
+    /// paste remote content on the client machine.
+    RemoteClipboard(String),
     /// RDP session status update (progress / diagnostics text).
     RdpStatus {
         tab_id: String,

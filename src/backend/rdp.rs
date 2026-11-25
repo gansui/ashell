@@ -250,13 +250,26 @@ fn handle_rdp_event(
             }
         }
         RdpEvent::Cliprdr(data) => {
-            // A clipboard virtual-channel payload from the server. If it is a
-            // format-data request, answer with the host clipboard text.
             if cliprdr_is_format_data_request(&data) {
+                // Host -> remote: the server wants our clipboard text.
                 if let Some(text) = clipboard {
                     if let Ok(mut q) = send_queue.lock() {
                         q.push(cliprdr_format_data_response(text));
                     }
+                }
+            } else if cliprdr_is_format_list(&data) {
+                // Remote -> host: the server announced it copied something (or
+                // cleared its clipboard). Ask it for the CF_UNICODETEXT payload
+                // so we can mirror the remote clipboard into the host.
+                if let Ok(mut q) = send_queue.lock() {
+                    q.push(cliprdr_format_data_request(13));
+                }
+            } else if cliprdr_is_format_data_response(&data) {
+                // Remote -> host: the server answered our format-data request.
+                // Decode the UTF-16LE text and hand it to the UI, which writes
+                // it into the host system clipboard.
+                if let Some(text) = cliprdr_decode_text_response(&data) {
+                    let _ = events.send(BackendEvent::RemoteClipboard(text));
                 }
             }
         }
@@ -320,6 +333,39 @@ fn cliprdr_monitor_ready() -> Vec<u8> {
 /// (0x0004), meaning the remote wants the host clipboard data.
 fn cliprdr_is_format_data_request(data: &[u8]) -> bool {
     data.len() >= 2 && u16::from_le_bytes([data[0], data[1]]) == 0x0004
+}
+
+/// Return true when a cliprdr payload is a `CB_FORMAT_LIST` (0x0002): the
+/// server announcing it copied or cleared its clipboard.
+fn cliprdr_is_format_list(data: &[u8]) -> bool {
+    data.len() >= 2 && u16::from_le_bytes([data[0], data[1]]) == 0x0002
+}
+
+/// Return true when a cliprdr payload is a `CB_FORMAT_DATA_RESPONSE` (0x0005).
+fn cliprdr_is_format_data_response(data: &[u8]) -> bool {
+    data.len() >= 2 && u16::from_le_bytes([data[0], data[1]]) == 0x0005
+}
+
+/// Build a `CB_FORMAT_DATA_REQUEST` (0x0004) asking the server for the payload
+/// of `format_id` (CF_UNICODETEXT is 13).
+fn cliprdr_format_data_request(format_id: u32) -> Vec<u8> {
+    let mut data = Vec::with_capacity(4);
+    data.extend_from_slice(&format_id.to_le_bytes());
+    let mut msg = cliprdr_header(0x0004, 0, data.len() as u32);
+    msg.extend_from_slice(&data);
+    msg
+}
+
+/// Decode a `CB_FORMAT_DATA_RESPONSE` payload into UTF-16LE text. Layout after
+/// the 8-byte header: a u32 `responseData` length, then the format data.
+fn cliprdr_decode_text_response(data: &[u8]) -> Option<String> {
+    let body = data.get(12..)?;
+    let bytes = body.strip_suffix(&[0u8, 0u8]).unwrap_or(body);
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    String::from_utf16(&units).ok()
 }
 
 /// Build a `CB_FORMAT_DATA_RESPONSE` (0x0005) carrying the host clipboard text
