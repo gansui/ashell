@@ -346,12 +346,11 @@ fn cliprdr_caps() -> Vec<u8> {
     data.extend_from_slice(&0x0001u16.to_le_bytes()); // capabilitySetType = General
     data.extend_from_slice(&12u16.to_le_bytes()); // lengthCapability
     data.extend_from_slice(&0x0002u32.to_le_bytes()); // version = CB_CAPS_VERSION_2
-    // generalFlags must advertise CB_USE_LONG_FORMAT_NAMES (0x10): the
-    // CB_FORMAT_LIST entries below are encoded with a LenField format name
-    // (formatId u32 + LenField), which is the long-format-name form. The old
-    // 0x2 (CB_FILECLIP_NO_FILE_PATHS) did not imply long names, so the server
-    // parsed our format list as short 32-byte names and dropped it.
-    data.extend_from_slice(&0x00000010u32.to_le_bytes()); // generalFlags = long format names
+    // generalFlags MUST advertise CB_USE_LONG_FORMAT_NAMES (0x2) because the
+    // CB_FORMAT_LIST entries below use the long-format-name form (formatId +
+    // a length-prefixed / null-terminated UTF-16 name). 0x10 is CAN_LOCK_CLIPDATA,
+    // not long names — the server already advertises 0x3e (which includes 0x2).
+    data.extend_from_slice(&0x00000002u32.to_le_bytes()); // generalFlags = long format names
     let mut msg = cliprdr_header(0x0007, 0x0001, data.len() as u32); // msgFlags = CB_RESPONSE
     msg.extend_from_slice(&data);
     msg
@@ -396,15 +395,16 @@ fn cliprdr_format_list_response() -> Vec<u8> {
 /// that flag marks a reply to a request, and announcing a change is a fresh
 /// event, not a reply.
 fn cliprdr_format_list_request() -> Vec<u8> {
-    // Long-format-name encoding (negotiated via cliprdr_caps: long format
-    // names). Each format entry is formatId (u32) + a LenField format name.
-    // An empty format name is a single 0x00 byte, so one CF_UNICODETEXT entry
-    // is 2(cFormats) + 2(pad) + 4(formatId) + 1(empty name) = 9 bytes.
-    let mut data = Vec::with_capacity(9);
+    // Long-format-name + Unicode (no ASCII_NAMES flag) encoding, as in
+    // IronRDP FormatList::new_unicode. Each entry is formatId (u32) + a
+    // UTF-16 null-terminated name. An empty name is the two-byte null
+    // terminator [0x00, 0x00], so one CF_UNICODETEXT entry is 4 + 2 = 6 bytes
+    // and the full data is 2(cFormats) + 2(pad) + 6 = 10 bytes.
+    let mut data = Vec::with_capacity(10);
     data.extend_from_slice(&1u16.to_le_bytes()); // cFormats = 1
     data.extend_from_slice(&0u16.to_le_bytes()); // pad
     data.extend_from_slice(&13u32.to_le_bytes()); // CF_UNICODETEXT formatId
-    data.push(0x00); // formatName LenField: length 0 (empty name)
+    data.extend_from_slice(&0u16.to_le_bytes()); // formatName = UTF-16 null terminator
     let mut msg = cliprdr_header(0x0002, 0, data.len() as u32); // CB_FORMAT_LIST
     msg.extend_from_slice(&data);
     msg
