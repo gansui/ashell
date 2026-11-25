@@ -314,6 +314,12 @@ fn handle_rdp_event(
                     q.push(cliprdr_caps());
                     q.push(cliprdr_temp_directory());
                     q.push(cliprdr_format_list_request());
+                    // Diagnostic: also actively request the server's clipboard.
+                    // If the server answers with a CB_FORMAT_DATA_RESPONSE, our
+                    // upstream PDUs are reaching it (and B->A works); if it stays
+                    // silent, our cliprdr writes never reach the server and the
+                    // problem is upstream channel delivery, not PDU encoding.
+                    q.push(cliprdr_format_data_request(13));
                 }
             } else {
                 // Diagnostic catch-all: log any cliprdr payload we don't
