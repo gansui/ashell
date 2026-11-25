@@ -177,6 +177,9 @@ fn run_rdp(
                     }
                 }
                 BackendCommand::RdpSetClipboard(text) => {
+                    if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+                        eprintln!("[ashell] RdpSetClipboard len={}", text.len());
+                    }
                     clipboard_text = Some(text.clone());
                     // Advertise the host clipboard to the server so the remote
                     // gets the text pushed into its clipboard, not only when it
@@ -380,16 +383,19 @@ fn cliprdr_format_list_response() -> Vec<u8> {
     cliprdr_header(0x0003, 0x0001, 0) // msgFlags = CB_RESPONSE
 }
 
-/// Build a `CB_FORMAT_LIST_REQUEST` (0x0001) announcing the host clipboard now
-/// holds CF_UNICODETEXT. The server answers with a CB_FORMAT_LIST_RESPONSE and
-/// then a CB_FORMAT_DATA_REQUEST, which the loop answers with the cached text —
-/// pushing the host clipboard into the remote without waiting for a paste.
+/// Build a `CB_FORMAT_LIST` (0x0002) announcing the host clipboard now holds
+/// CF_UNICODETEXT. Announcing (rather than `CB_FORMAT_LIST_REQUEST` 0x0001, which
+/// reads the remote clipboard) is what pushes host text into the remote: the
+/// server answers with a CB_FORMAT_LIST_RESPONSE and then a CB_FORMAT_DATA_REQUEST,
+/// which the loop answers with the cached text. Must NOT carry CB_RESPONSE —
+/// that flag marks a reply to a request, and announcing a change is a fresh
+/// event, not a reply.
 fn cliprdr_format_list_request() -> Vec<u8> {
     let mut data = Vec::with_capacity(8);
     data.extend_from_slice(&1u16.to_le_bytes()); // cFormats = 1
     data.extend_from_slice(&0u16.to_le_bytes()); // pad
     data.extend_from_slice(&13u32.to_le_bytes()); // CF_UNICODETEXT formatId
-    let mut msg = cliprdr_header(0x0001, 0x0001, data.len() as u32); // CB_RESPONSE
+    let mut msg = cliprdr_header(0x0002, 0, data.len() as u32); // CB_FORMAT_LIST
     msg.extend_from_slice(&data);
     msg
 }
