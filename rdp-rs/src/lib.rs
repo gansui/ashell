@@ -1,3 +1,5 @@
+#![allow(mismatched_lifetime_syntaxes)]
+
 extern crate byteorder;
 extern crate indexmap;
 extern crate yasna;

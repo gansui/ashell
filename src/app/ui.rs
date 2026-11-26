@@ -6448,12 +6448,11 @@ impl Render for Ashell {
                                                         .label(t!("copy_error").to_string())
                                                         .on_click(cx.listener(
                                                             |this, _, _, cx| {
-                                                                let mut text = String::new();
                                                                 if let Some(progress) =
                                                                     this.connection_progress
                                                                         .clone()
                                                                 {
-                                                                    text = progress
+                                                                    let mut text = progress
                                                                         .title
                                                                         .to_string();
                                                                     let lines: Vec<&str> = progress

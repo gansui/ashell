@@ -834,6 +834,7 @@ pub enum BackendEvent {
     TerminalBell {
         tab_id: String,
     },
+    #[allow(dead_code)]
     LocalDirectoryChanged {
         tab_id: String,
         path: std::path::PathBuf,

@@ -580,7 +580,7 @@ impl TerminalElement {
         };
 
         self.snapshot.cursor.map(|cursor| {
-            let mut shape = match cursor_style {
+            let shape = match cursor_style {
                 CursorStyle::Default => cursor.shape,
                 CursorStyle::Blink => CursorShape::Block,
                 CursorStyle::Beam => CursorShape::Beam,

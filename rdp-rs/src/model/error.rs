@@ -56,6 +56,7 @@ pub struct RdpError {
     /// Kind of error
     kind: RdpErrorKind,
     /// Associated message of the context
+    #[allow(dead_code)]
     message: String
 }
 
