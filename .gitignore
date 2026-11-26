@@ -6,3 +6,5 @@ zed/
 # 临时文件
 tmp/
 rdp-rs-orig/
+IronRDP/
+paste.md
