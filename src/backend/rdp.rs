@@ -139,6 +139,9 @@ fn run_rdp(
     // Host clipboard text cached here so the backend can answer the server's
     // clipboard format-data requests without blocking on the GPUI main thread.
     let mut clipboard_text: Option<String> = None;
+    // Last host clipboard text announced to the server, so we only send a fresh
+    // CB_FORMAT_LIST when it actually changes instead of once per keystroke.
+    let mut last_announced: Option<String> = None;
     let send_queue: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
 
     // CLIPRDR initialization: as the client we are NOT the initiator. IronRDP's
@@ -179,16 +182,18 @@ fn run_rdp(
                     }
                 }
                 BackendCommand::RdpSetClipboard(text) => {
-                    if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
-                        eprintln!("[ashell] RdpSetClipboard len={}", text.len());
-                    }
+                    let changed = last_announced.as_deref() != Some(text.as_str());
+                    rdp::clip_log!("RdpSetClipboard len={} changed={}", text.len(), changed);
                     clipboard_text = Some(text.clone());
-                    // Advertise the host clipboard to the server so the remote
-                    // gets the text pushed into its clipboard, not only when it
-                    // pastes. Without a CB_FORMAT_LIST_REQUEST the server has no
-                    // way to know the host side changed, so A->B stays stale.
-                    if let Ok(mut q) = send_queue.lock() {
-                        q.push(cliprdr_format_list_request());
+                    // Announce only when the host clipboard really changed. A
+                    // stream of identical CB_FORMAT_LISTs (one per keystroke)
+                    // makes rdpclip treat the clipboard as already known and it
+                    // stops issuing the CB_FORMAT_DATA_REQUEST, so A->B stalls.
+                    if changed {
+                        last_announced = Some(text.clone());
+                        if let Ok(mut q) = send_queue.lock() {
+                            q.push(cliprdr_format_list_request());
+                        }
                     }
                 }
                 _ => {}
@@ -292,6 +297,17 @@ fn handle_rdp_event(
                 if let Some(text) = text {
                     if let Ok(mut q) = send_queue.lock() {
                         q.push(cliprdr_format_data_response(&text));
+                    }
+                } else {
+                    // No data yet (the server often asks during login, before
+                    // the host clipboard holds anything). Reply with
+                    // CB_RESPONSE_FAIL rather than staying silent: rdpclip runs a
+                    // request/response state machine, and a missing reply leaves
+                    // it stuck so it never asks again once the host clipboard is
+                    // filled later. FreeRDP does the same (cliprdr_send_error_
+                    // response -> CB_RESPONSE_FAIL, empty body).
+                    if let Ok(mut q) = send_queue.lock() {
+                        q.push(cliprdr_format_data_response_fail());
                     }
                 }
             } else if cliprdr_is_format_list(&data) {
@@ -551,4 +567,12 @@ fn cliprdr_format_data_response(text: &str) -> Vec<u8> {
     let mut msg = cliprdr_header(0x0005, 0x0001, data.len() as u32); // msgFlags = CB_RESPONSE
     msg.extend_from_slice(&data);
     msg
+}
+
+/// Build a `CB_FORMAT_DATA_RESPONSE` (0x0005) signalling the host has no data
+/// for the requested format (CB_RESPONSE_FAIL, empty body), matching FreeRDP
+/// `cliprdr_send_error_response`. A reply — even a failure — keeps the server's
+/// request/response state machine advancing; silence stalls it.
+fn cliprdr_format_data_response_fail() -> Vec<u8> {
+    cliprdr_header(0x0005, 0x0002, 0) // msgFlags = CB_RESPONSE_FAIL
 }
