@@ -668,9 +668,12 @@ impl Ashell {
                 let tid = tab_id_owned.clone();
                 move |this, event: &KeyDownEvent, _, cx| {
                     // Sync the host clipboard so the remote can paste it.
-                    if let Some(clip) = cx.read_from_clipboard()
-                        && let Some(text) = clip.text()
-                    {
+                    let clip_text = cx.read_from_clipboard().and_then(|c| c.text());
+                    rdp::clip_log!(
+                        "UI on_key_down: clipboard_len={:?}",
+                        clip_text.as_ref().map(|t| t.len())
+                    );
+                    if let Some(text) = clip_text {
                         this.send_rdp_clipboard(&tid, &text);
                     }
                     let key_str = event.keystroke.key.to_ascii_lowercase();
@@ -5639,11 +5642,15 @@ impl Ashell {
                                 .iter()
                                 .find(|t| t.id == tab_id_clone2.as_str())
                                 .is_some_and(|t| t.kind == crate::terminal::TabKind::Rdp);
-                            if is_rdp
-                                && let Some(clip) = cx.read_from_clipboard()
-                                && let Some(text) = clip.text()
-                            {
-                                this.send_rdp_clipboard(&tab_id_clone2, &text);
+                            if is_rdp {
+                                let clip_text = cx.read_from_clipboard().and_then(|c| c.text());
+                                rdp::clip_log!(
+                                    "UI on_mouse_down RDP: clipboard_len={:?}",
+                                    clip_text.as_ref().map(|t| t.len())
+                                );
+                                if let Some(text) = clip_text {
+                                    this.send_rdp_clipboard(&tab_id_clone2, &text);
+                                }
                             }
                             if active_tab_changed {
                                 this.prompt_active_ssh_reconnect_if_needed(window, cx);

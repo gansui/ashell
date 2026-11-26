@@ -280,6 +280,10 @@ fn handle_rdp_event(
         RdpEvent::Cliprdr(data) => {
             if cliprdr_is_format_data_request(&data) {
                 // Host -> remote: the server wants our clipboard text.
+                rdp::clip_log!(
+                    "format_data_request: clipboard_len={:?}",
+                    clipboard.as_ref().map(|s| s.len())
+                );
                 if let Some(text) = clipboard {
                     if let Ok(mut q) = send_queue.lock() {
                         q.push(cliprdr_format_data_response(text));
