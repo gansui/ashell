@@ -279,14 +279,19 @@ fn handle_rdp_event(
         }
         RdpEvent::Cliprdr(data) => {
             if cliprdr_is_format_data_request(&data) {
-                // Host -> remote: the server wants our clipboard text.
+                // Host -> remote: the server wants our clipboard text. Prefer a
+                // live read of the OS clipboard: the server often asks before
+                // the UI has pushed its copy, and reading here is synchronous
+                // with the request, so the reply never races the cache.
+                let text = read_clipboard_text().or_else(|| clipboard.clone());
                 rdp::clip_log!(
-                    "format_data_request: clipboard_len={:?}",
-                    clipboard.as_ref().map(|s| s.len())
+                    "format_data_request: cache_len={:?} reply_len={:?}",
+                    clipboard.as_ref().map(|s| s.len()),
+                    text.as_ref().map(|s| s.len())
                 );
-                if let Some(text) = clipboard {
+                if let Some(text) = text {
                     if let Ok(mut q) = send_queue.lock() {
-                        q.push(cliprdr_format_data_response(text));
+                        q.push(cliprdr_format_data_response(&text));
                     }
                 }
             } else if cliprdr_is_format_list(&data) {
@@ -366,6 +371,50 @@ fn is_disconnect_error(error: &rdp::model::error::Error) -> bool {
 // --- CLIPRDR (MS-RDPECLIP) helpers ---
 
 /// Build a CLIPRDR message header (msgType u16, msgFlags u16, dataLen u32).
+/// Read the local (host) clipboard as Unicode text. Returns `None` when the
+/// clipboard is empty, holds no text, or cannot be opened (e.g. held by another
+/// process). Used to answer `CB_FORMAT_DATA_REQUEST` straight from the OS
+/// clipboard so the reply never depends on the UI having synced first.
+#[cfg(target_os = "windows")]
+fn read_clipboard_text() -> Option<String> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+
+    // CF_UNICODETEXT
+    const CF_UNICODETEXT: u32 = 13;
+
+    unsafe {
+        if OpenClipboard(HWND(0)).is_err() {
+            return None;
+        }
+        let text = (|| {
+            let handle = GetClipboardData(CF_UNICODETEXT).ok()?;
+            let hglobal = windows::Win32::Foundation::HGLOBAL(handle.0 as *mut core::ffi::c_void);
+            let ptr = GlobalLock(hglobal);
+            if ptr.is_null() {
+                return None;
+            }
+            let wide = ptr as *const u16;
+            let mut len = 0usize;
+            while *wide.add(len) != 0 {
+                len += 1;
+            }
+            let slice = std::slice::from_raw_parts(wide, len);
+            let text = String::from_utf16_lossy(slice);
+            let _ = GlobalUnlock(hglobal);
+            Some(text)
+        })();
+        let _ = CloseClipboard();
+        text
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_clipboard_text() -> Option<String> {
+    None
+}
+
 fn cliprdr_header(msg_type: u16, flags: u16, data_len: u32) -> Vec<u8> {
     let mut v = Vec::with_capacity(8 + data_len as usize);
     v.extend_from_slice(&msg_type.to_le_bytes());
