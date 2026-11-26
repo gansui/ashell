@@ -540,10 +540,11 @@ fn cliprdr_format_data_request(format_id: u32) -> Vec<u8> {
     msg
 }
 
-/// Decode a `CB_FORMAT_DATA_RESPONSE` payload into UTF-16LE text. Layout after
-/// the 8-byte header: a u32 `responseData` length, then the format data.
+/// Decode a `CB_FORMAT_DATA_RESPONSE` payload into UTF-16LE text. For
+/// CF_UNICODETEXT the format data starts right after the 8-byte CLIPRDR header
+/// and IS the null-terminated UTF-16LE string — there is no u32 length prefix.
 fn cliprdr_decode_text_response(data: &[u8]) -> Option<String> {
-    let body = data.get(12..)?;
+    let body = data.get(8..)?;
     let bytes = body.strip_suffix(&[0u8, 0u8]).unwrap_or(body);
     let units: Vec<u16> = bytes
         .chunks_exact(2)
@@ -560,12 +561,11 @@ fn cliprdr_format_data_response(text: &str) -> Vec<u8> {
         text_data.extend_from_slice(&unit.to_le_bytes());
     }
     text_data.extend_from_slice(&0u16.to_le_bytes()); // null terminator
-    // The response body starts with a u32 length of the format data.
-    let mut data = Vec::with_capacity(4 + text_data.len());
-    data.extend_from_slice(&(text_data.len() as u32).to_le_bytes());
-    data.extend_from_slice(&text_data);
-    let mut msg = cliprdr_header(0x0005, 0x0001, data.len() as u32); // msgFlags = CB_RESPONSE
-    msg.extend_from_slice(&data);
+    // CF_UNICODETEXT format data is the UTF-16LE string itself (null-terminated);
+    // there is no u32 length prefix. Prepending one makes the server read the
+    // length bytes as the first characters, so the pasted text comes out garbled.
+    let mut msg = cliprdr_header(0x0005, 0x0001, text_data.len() as u32); // msgFlags = CB_RESPONSE
+    msg.extend_from_slice(&text_data);
     msg
 }
 
