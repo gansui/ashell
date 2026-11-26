@@ -259,10 +259,13 @@ impl<S: Read + Write> Client<S> {
         }
         for channel_id in join_ids {
             self.x224.write(channel_join_request(self.user_id, Some(channel_id))?)?;
-            if !read_channel_join_confirm(self.user_id.unwrap(), channel_id, &mut try_let!(tpkt::Payload::Raw, self.x224.read()?)?)? {
+            let joined = read_channel_join_confirm(self.user_id.unwrap(), channel_id, &mut try_let!(tpkt::Payload::Raw, self.x224.read()?)?)?;
+            clip_log!("MCS: join channel {} -> {}", channel_id, joined);
+            if !joined {
                 println!("Server reject channel id {:?}", channel_id);
             }
         }
+        clip_log!("MCS: user_id={:?} channel_ids={:?}", self.user_id, self.channel_ids);
 
         Ok(())
     }
@@ -285,6 +288,14 @@ impl<S: Read + Write> Client<S> {
                 &format!("MCS: unknown channel {:?}", channel_name),
             ))
         })?;
+        if channel_name == "cliprdr" {
+            clip_log!(
+                "MCS write cliprdr: channel_id={} initiator={} len={}",
+                channel_id,
+                self.user_id.unwrap().wrapping_sub(1001),
+                message.length()
+            );
+        }
         self.x224.write(trame![
             mcs_pdu_header(Some(DomainMCSPDU::SendDataRequest), None),
             U16::BE(self.user_id.unwrap() - 1001),
