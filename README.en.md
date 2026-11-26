@@ -8,6 +8,9 @@
 
 This project focuses on providing a high-performance and visually appealing shell workspace by combining local and remote environments with a rich set of built-in features. 
 
+This modification is from https://github.com/rust-kotlin/ashell and added
+1.rdp protocol support
+2.increase the cursor brightness
 ## 🚀 v0.4 Major Upgrades
 
 v0.4 builds on the v0.3 foundation and focuses on more capable workspace operations and a smoother daily workflow:
