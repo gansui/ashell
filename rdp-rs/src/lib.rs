@@ -25,13 +25,12 @@ extern crate clap;
 pub mod model;
 
 /// Append a cliprdr diagnostic line to `rdp_clip_debug.log` in the working
-/// directory. ON by default so it triggers even without the env var (Windows
-/// GUI launch often drops the inherited environment). Set RDP_CLIP_DEBUG=0
-/// to silence it.
+/// directory. OFF by default; set RDP_CLIP_DEBUG=1 (or any non-"0" value)
+/// to enable it.
 #[macro_export]
 macro_rules! clip_log {
     ($($arg:tt)*) => {{
-        if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+        if std::env::var_os("RDP_CLIP_DEBUG").map_or(false, |v| v != "0") {
             use std::io::Write;
             let line = format!("[rdp-clip] {}\n", format_args!($($arg)*));
             for p in ["rdp_clip_debug.log", "ashell/rdp_clip_debug.log"] {

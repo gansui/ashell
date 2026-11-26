@@ -82,14 +82,14 @@ impl<S: Read + Write> RdpClient<S> {
                 // Flags u32) the server prepends to static-virtual-channel data
                 // (sent when the channel is compressed/chunked). Without this the
                 // cliprdr msgType lands at offset 8 and every handler check fails.
-                if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+                if std::env::var_os("RDP_CLIP_DEBUG").map_or(false, |v| v != "0") {
                     let hx: Vec<String> = buf.iter().take(12).map(|b| format!("{:02x}", b)).collect();
                     clip_log!("recv cliprdr RAW {} bytes: {}", buf.len(), hx.join(" "));
                 }
                 if buf.len() >= 8 {
                     buf.drain(..8);
                 }
-                if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+                if std::env::var_os("RDP_CLIP_DEBUG").map_or(false, |v| v != "0") {
                     let hex: Vec<String> = buf.iter().take(24).map(|b| format!("{:02x}", b)).collect();
                     clip_log!("recv cliprdr {} bytes: {}", buf.len(), hex.join(" "));
                 }
@@ -102,7 +102,7 @@ impl<S: Read + Write> RdpClient<S> {
 
     /// Send a raw payload to the clipboard virtual channel (cliprdr).
     pub fn write_clipboard(&mut self, data: Vec<u8>) -> RdpResult<()> {
-        if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+        if std::env::var_os("RDP_CLIP_DEBUG").map_or(false, |v| v != "0") {
             let hex: Vec<String> = data.iter().take(24).map(|b| format!("{:02x}", b)).collect();
             clip_log!("-> write_clipboard {} bytes: {}", data.len(), hex.join(" "));
         }
@@ -121,7 +121,7 @@ impl<S: Read + Write> RdpClient<S> {
         // CLIPRDR PDUs while still delivering ours downstream.
         pdu.extend_from_slice(&0x13u32.to_le_bytes());
         pdu.extend_from_slice(&data);
-        if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
+        if std::env::var_os("RDP_CLIP_DEBUG").map_or(false, |v| v != "0") {
             let hx: Vec<String> = pdu.iter().take(12).map(|b| format!("{:02x}", b)).collect();
             clip_log!("  WIRE {} bytes: {}", pdu.len(), hx.join(" "));
         }
