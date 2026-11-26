@@ -90,19 +90,21 @@ fn run_rdp(
         text: format!("connecting rdp {}:{}...", host, port),
     });
 
-    // Diagnostics: unconditionally record that the RDP thread started, plus
-    // every candidate log path, so a missing file is immediately attributable
-    // to "the backend never ran" rather than to a cwd/env issue.
-    let startup_line = format!(
-        "[rdp] backend start host={host}:{port} pid={} cwd={:?} exe={:?}\n",
-        std::process::id(),
-        std::env::current_dir(),
-        std::env::current_exe(),
-    );
-    for p in ["rdp_clip_debug.log", "ashell/rdp_clip_debug.log"] {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
-            use std::io::Write;
-            let _ = f.write_all(startup_line.as_bytes());
+    // Diagnostics: record that the RDP thread started, gated behind the same
+    // RDP_CLIP_DEBUG opt-in (OFF by default) as the rdp-rs cliprdr logging, so
+    // a normal launch leaves no rdp_clip_debug.log behind.
+    if std::env::var_os("RDP_CLIP_DEBUG").map_or(false, |v| v != "0") {
+        let startup_line = format!(
+            "[rdp] backend start host={host}:{port} pid={} cwd={:?} exe={:?}\n",
+            std::process::id(),
+            std::env::current_dir(),
+            std::env::current_exe(),
+        );
+        for p in ["rdp_clip_debug.log", "ashell/rdp_clip_debug.log"] {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+                use std::io::Write;
+                let _ = f.write_all(startup_line.as_bytes());
+            }
         }
     }
 
