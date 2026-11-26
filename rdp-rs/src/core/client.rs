@@ -114,7 +114,12 @@ impl<S: Read + Write> RdpClient<S> {
         // misparses our CLIPRDR PDUs and ignores them.
         let mut pdu = Vec::with_capacity(data.len() + 8);
         pdu.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        pdu.extend_from_slice(&0x03u32.to_le_bytes()); // FIRST | LAST
+        // FIRST | LAST | SHOW_PROTOCOL. We declare CHANNEL_OPTION_SHOW_PROTOCOL
+        // on the channel (like FreeRDP's cliprdr client), and FreeRDP then sets
+        // CHANNEL_FLAG_SHOW_PROTOCOL in the header of every chunk it sends
+        // (channels.c / peer.c). Omitting it makes the server drop our upstream
+        // CLIPRDR PDUs while still delivering ours downstream.
+        pdu.extend_from_slice(&0x13u32.to_le_bytes());
         pdu.extend_from_slice(&data);
         if std::env::var_os("RDP_CLIP_DEBUG").map_or(true, |v| v != "0") {
             let hx: Vec<String> = pdu.iter().take(12).map(|b| format!("{:02x}", b)).collect();
